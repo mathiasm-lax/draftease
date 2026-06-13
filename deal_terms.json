@@ -1,0 +1,20 @@
+{
+  "property_name": "350 Park Avenue",
+  "suite": "1200",
+  "lease_date": "June 11, 2026",
+  "landlord": "Meridian RE Holdings, LLC",
+  "tenant": "Lockton Advisors, Inc.",
+  "rentable_sf": "18,400",
+  "floor": "12th",
+  "term_months": "87",
+  "commencement_date": "September 1, 2026",
+  "expiration_date": "November 30, 2033",
+  "base_rent_psf": "$72.50",
+  "monthly_rent": "$111,166.67",
+  "annual_escalation": "three percent (3%)",
+  "free_rent_months": "four (4)",
+  "security_deposit": "$220,000.00",
+  "ti_allowance_psf": "$95.00",
+  "renewal_option": "one (1) option to renew for five (5) years at fair market value",
+  "permitted_use": "general, administrative and executive offices"
+}

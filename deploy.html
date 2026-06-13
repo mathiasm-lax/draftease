@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Deploy Draftease to Render</title>
+<style>
+  *{box-sizing:border-box}
+  body{font-family:-apple-system,Segoe UI,Roboto,sans-serif;background:#f5f7fb;color:#0e1626;margin:0;padding:48px 16px}
+  .card{max-width:640px;margin:0 auto;background:#fff;border:1px solid #e6e9f2;border-radius:18px;padding:34px;
+    box-shadow:0 14px 40px rgba(14,22,38,.10)}
+  .brand{display:flex;align-items:center;gap:10px;font-weight:800;font-size:20px;letter-spacing:-.02em;margin-bottom:18px}
+  .mark{width:30px;height:30px;border-radius:9px;background:linear-gradient(135deg,#4338ca,#7c3aed);color:#fff;
+    display:flex;align-items:center;justify-content:center;font-weight:800}
+  h1{font-size:23px;letter-spacing:-.02em;margin:0 0 6px}
+  p.sub{color:#697089;margin:0 0 24px;font-size:14.5px}
+  ol{padding-left:20px;color:#384156;font-size:14px;line-height:1.7}
+  ol code,p code{background:#eef0ff;color:#3730a3;padding:1px 6px;border-radius:5px;font-size:12.5px}
+  label{display:block;font-weight:600;font-size:13px;margin:22px 0 7px}
+  input{width:100%;font-size:14px;border:1px solid #e6e9f2;border-radius:10px;padding:12px}
+  input:focus{outline:none;border-color:#4338ca;box-shadow:0 0 0 3px #eef0ff}
+  .btnwrap{margin:22px 0 6px;text-align:center}
+  .deploy{display:inline-block;transition:.15s}
+  .deploy.off{opacity:.4;pointer-events:none;filter:grayscale(.4)}
+  .hint{font-size:12.5px;color:#697089;text-align:center;margin-top:4px}
+  .snip{margin-top:26px;border-top:1px solid #eef0f7;padding-top:20px}
+  .snip h3{font-size:13px;letter-spacing:.04em;text-transform:uppercase;color:#697089;margin:0 0 10px}
+  textarea{width:100%;height:78px;font-family:ui-monospace,Menlo,monospace;font-size:12px;border:1px solid #e6e9f2;
+    border-radius:10px;padding:11px;resize:vertical;color:#0e1626}
+  .copy{margin-top:10px;background:#4338ca;color:#fff;border:0;font-weight:600;font-size:13.5px;padding:10px 16px;
+    border-radius:9px;cursor:pointer}
+  .copy:hover{background:#3730a3}
+  .ok{color:#0f9d6e;font-weight:600;font-size:13px;margin-left:10px}
+</style>
+</head>
+<body>
+  <div class="card">
+    <div class="brand"><span class="mark">D</span> Draftease</div>
+    <h1>One-click deploy to Render</h1>
+    <p class="sub">Render builds the app from the <code>render.yaml</code> in your repo and gives you a permanent
+      <code>https://…onrender.com</code> address, with the secret key auto-generated.</p>
+
+    <ol>
+      <li>Put the <code>draftease</code> folder in a <b>public GitHub repository</b>
+        (<a href="https://desktop.github.com" target="_blank" rel="noopener">GitHub Desktop</a> makes this drag-and-drop).</li>
+      <li>Paste that repo's URL below.</li>
+      <li>Click <b>Deploy to Render</b>, sign in, and confirm. That's it.</li>
+    </ol>
+
+    <label>Your GitHub repository URL</label>
+    <input id="repo" type="text" placeholder="https://github.com/your-username/draftease" autocomplete="off">
+
+    <div class="btnwrap">
+      <a id="btn" class="deploy off" href="#" target="_blank" rel="noopener">
+        <img src="https://render.com/images/deploy-to-render-button.svg" alt="Deploy to Render" height="36">
+      </a>
+      <div class="hint" id="hint">Enter your repo URL above to activate the button.</div>
+    </div>
+
+    <div class="snip">
+      <h3>Or put the button in your repo's README</h3>
+      <textarea id="md" readonly></textarea>
+      <button class="copy" id="copyBtn">Copy markdown</button>
+      <span class="ok" id="copied" style="display:none">Copied ✓</span>
+    </div>
+  </div>
+
+<script>
+  const repo = document.getElementById('repo');
+  const btn = document.getElementById('btn');
+  const hint = document.getElementById('hint');
+  const md = document.getElementById('md');
+  const copyBtn = document.getElementById('copyBtn');
+  const copied = document.getElementById('copied');
+
+  function normalize(u){
+    u = (u || '').trim().replace(/\.git$/, '').replace(/\/$/, '');
+    return u;
+  }
+  function valid(u){ return /^https:\/\/github\.com\/[^/\s]+\/[^/\s]+$/.test(u); }
+
+  function update(){
+    const u = normalize(repo.value);
+    if (valid(u)) {
+      const deployUrl = 'https://render.com/deploy?repo=' + encodeURIComponent(u);
+      btn.href = deployUrl;
+      btn.classList.remove('off');
+      hint.textContent = 'Ready — click the button to deploy.';
+      md.value = '[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)]('
+        + deployUrl + ')';
+    } else {
+      btn.href = '#';
+      btn.classList.add('off');
+      hint.textContent = 'Enter a valid GitHub repo URL (https://github.com/you/draftease).';
+      md.value = '';
+    }
+  }
+  repo.addEventListener('input', update);
+  copyBtn.addEventListener('click', () => {
+    if (!md.value) return;
+    md.select();
+    navigator.clipboard.writeText(md.value).then(() => {
+      copied.style.display = 'inline';
+      setTimeout(() => copied.style.display = 'none', 1800);
+    });
+  });
+  update();
+</script>
+</body>
+</html>
