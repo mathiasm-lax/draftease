@@ -287,7 +287,7 @@ MARKETING = """
   <div class="pill"><span class="dot"></span> Built for landlords &amp; their brokers · Your docs stay in your cloud</div>
   <h1 class="hero-h">Drop in a signed LOI. Get back a <span class="grad">lease redline</span>.</h1>
   <p class="hero-sub">Draftease applies the terms from a signed letter of intent to your property's own form lease and returns a clean, tracked-changes first draft — ready for your attorney. No setup project, no platform to learn.</p>
-  <div class="hero-cta"><a class="btn btn-primary btn-lg" href="/signup">Start free trial</a><a class="btn btn-outline btn-lg" href="/login">Log in →</a></div>
+  <div class="hero-cta"><a class="btn btn-primary btn-lg" href="/signup">Start free trial</a><a class="btn btn-outline btn-lg" href="/signup">Watch the 60-second demo →</a></div>
   <div class="hero-note"><b>No credit card.</b> Be drafting in minutes — not after a 6-week implementation.</div>
   <div class="hero-shot">
     <div class="bar"><i></i><i></i><i></i><span class="u">app.draftease.com · 350 Park Ave — Lockton Advisors</span></div>
