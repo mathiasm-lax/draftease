@@ -1,20 +1,26 @@
-# Render Blueprint — gives Draftease an always-on https URL.
-# Use it: push this folder to a GitHub repo, then on render.com:
-#   New +  ->  Blueprint  ->  pick your repo  ->  Apply.
-# Render reads this file, builds the Dockerfile, and hands you a public URL.
+# Render Blueprint — Draftease web app + persistent Postgres database.
+# Push this to your repo; Render syncs the blueprint, creates the database,
+# and wires it into the app automatically.
+databases:
+  - name: draftease-db
+    plan: free            # free Postgres (note: free DBs expire after ~30 days)
+    databaseName: draftease
+    user: draftease
+
 services:
   - type: web
     name: draftease
     runtime: docker
-    plan: free                # free tier is fine to start
+    plan: free
     healthCheckPath: /health
     envVars:
       - key: DRAFTEASE_SECRET_KEY
-        generateValue: true   # Render generates a strong secret for you
+        generateValue: true          # strong secret, generated once and kept
+      - key: DRAFTEASE_DB_URL
+        fromDatabase:                # <-- accounts now live in Postgres, not on disk
+          name: draftease-db
+          property: connectionString
       - key: DRAFTEASE_HTTPS_ONLY
         value: "true"
       - key: DRAFTEASE_ALLOW_SIGNUP
-        value: "true"         # set to "false" once your accounts exist
-# Note: the default SQLite database lives on the container's disk and resets on
-# each deploy — perfect for testing. For persistent accounts, add a Render Disk
-# or a managed Postgres and set DRAFTEASE_DB_URL accordingly.
+        value: "true"                # set to "false" once your accounts exist

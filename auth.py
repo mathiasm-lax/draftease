@@ -19,8 +19,19 @@ import bcrypt
 from sqlalchemy import Boolean, DateTime, String, create_engine, select
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column
 
-DB_URL = os.environ.get("DRAFTEASE_DB_URL", "sqlite:///draftease.db")
-_engine = create_engine(DB_URL, echo=False, future=True)
+def _normalize_db_url(url: str) -> str:
+    """Render/Heroku hand out 'postgres://' or 'postgresql://'; SQLAlchemy with the
+    psycopg 3 driver wants the 'postgresql+psycopg://' prefix. Leave sqlite alone."""
+    if url.startswith("postgres://"):
+        return "postgresql+psycopg://" + url[len("postgres://"):]
+    if url.startswith("postgresql://"):
+        return "postgresql+psycopg://" + url[len("postgresql://"):]
+    return url
+
+
+DB_URL = _normalize_db_url(os.environ.get("DRAFTEASE_DB_URL", "sqlite:///draftease.db"))
+# pool_pre_ping keeps hosted Postgres connections healthy across idle periods.
+_engine = create_engine(DB_URL, echo=False, future=True, pool_pre_ping=True)
 
 EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 PW_MIN = 8
