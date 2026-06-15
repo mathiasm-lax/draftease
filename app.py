@@ -6,15 +6,17 @@ deterministic redline engine.
 import io
 import json
 import os
+import re
 import secrets
 import tempfile
 
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
-from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse
+from fastapi.responses import (HTMLResponse, JSONResponse, RedirectResponse,
+                               StreamingResponse)
 from starlette.middleware.sessions import SessionMiddleware
 
 import auth
-from redline_engine import generate_redline
+from redline_engine import extract_tokens, generate_redline
 
 DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 MAX_BYTES = 15 * 1024 * 1024
@@ -260,6 +262,9 @@ tr.row{cursor:pointer}tr.row:hover td{background:var(--bg-softer)}
 .auth button[type=submit]:hover{background:#3730a3}
 .muted-link{font-size:13.5px;color:var(--muted);margin-top:18px;text-align:center}.muted-link a{color:var(--brand);font-weight:600}
 .err{background:#fdecef;color:#b3243c;border:1px solid #f6c9d2;border-radius:10px;padding:11px 13px;font-size:13.5px;margin-bottom:4px}
+.xbtn{background:none;border:none;color:var(--muted);cursor:pointer;font-size:13px;width:24px;height:24px;border-radius:7px;flex:none}.xbtn:hover{background:#fdecef;color:var(--red)}
+.field-label{display:block;font-weight:600;font-size:13.5px;margin:16px 0 8px}.field-label:first-of-type{margin-top:0}
+.content select{font-family:inherit}
 @media(max-width:900px){.nav-links{display:none}h1.hero-h{font-size:40px}.hero-shot .body,.steps,.diff,.pricing,.security,.cards,.tgrid,.choose{grid-template-columns:1fr}.app{grid-template-columns:1fr}.side{display:none}}
 """
 
@@ -402,124 +407,83 @@ APP_SHELL = """
 <script>
 const CSRF="__CSRF__";
 const FULLTERMS=__FULLTERMS__;
-const PROPERTIES=[
-  {id:1,name:"350 Park Avenue",addr:"Suite 1200 · Office",type:"O",redlines:24},
-  {id:2,name:"One Harbor Point",addr:"Retail pad · Stamford, CT",type:"R",redlines:11},
-  {id:3,name:"Gateway Logistics Ctr",addr:"Building C · Industrial",type:"I",redlines:7},
-  {id:4,name:"The Whitman",addr:"Ground-floor retail · NYC",type:"R",redlines:5},
-  {id:5,name:"Tribeca Commons",addr:"Floors 3-5 · Office",type:"O",redlines:3}];
-const REDLINES=[
-  {deal:"Lockton Advisors",prop:"350 Park Avenue",date:"Jun 9, 2026",by:"A. Reyes",status:"done"},
-  {deal:"Blue Bottle Coffee",prop:"One Harbor Point",date:"Jun 8, 2026",by:"J. Okafor",status:"review"},
-  {deal:"Vanta Logistics",prop:"Gateway Logistics Ctr",date:"Jun 6, 2026",by:"A. Reyes",status:"done"},
-  {deal:"Sweetgreen",prop:"The Whitman",date:"Jun 3, 2026",by:"Outside broker",status:"draft"},
-  {deal:"Held & Pierce LLP",prop:"Tribeca Commons",date:"May 28, 2026",by:"You",status:"done"}];
-const TERMS=[
-  {lbl:"Base rent / RSF",token:"base_rent_psf",val:"$72.50",conf:"hi"},
-  {lbl:"Rentable square feet",token:"rentable_sf",val:"18,400",conf:"hi"},
-  {lbl:"Lease term (months)",token:"term_months",val:"87",conf:"hi"},
-  {lbl:"Commencement date",token:"commencement_date",val:"September 1, 2026",conf:"med"},
-  {lbl:"Free rent",token:"free_rent_months",val:"four (4)",conf:"hi"},
-  {lbl:"TI allowance / RSF",token:"ti_allowance_psf",val:"$95.00",conf:"hi"},
-  {lbl:"Security deposit",token:"security_deposit",val:"$220,000.00",conf:"med"},
-  {lbl:"Renewal option",token:"renewal_option",val:"one (1) option to renew for five (5) years at fair market value",conf:"med"}];
-let wizardStep=1,selProp=null,leaseFile=null,editedTerms={};
-const TITLES={dashboard:["Dashboard","Welcome back - here's your deal activity."],redlines:["Redlines","Every draft generated across your properties."],templates:["Templates","Your form lease for each property."],settings:["Settings & billing","Manage your plan, seats and security."],wizard:["New redline","Turn a signed LOI into a tracked-changes draft."]};
-function go(v){
-  document.querySelectorAll('.side-link[data-nav]').forEach(l=>l.classList.toggle('active',l.dataset.nav===v));
-  const t=TITLES[v]||TITLES.dashboard;document.getElementById('pageTitle').textContent=t[0];document.getElementById('pageSub').textContent=t[1];
-  if(v==='wizard'){wizardStep=1;selProp=null;leaseFile=null;editedTerms={};}
-  document.getElementById('appContent').innerHTML=({dashboard:vDashboard,redlines:vRedlines,templates:vTemplates,settings:vSettings,wizard:vWizard}[v]||vDashboard)();
-  document.querySelector('.main').scrollTo(0,0);
-}
-function statusTag(s){const m={done:["done","Ready"],review:["review","In review"],draft:["draft","Draft"]};return `<span class="tag ${m[s][0]}"><span class="d"></span>${m[s][1]}</span>`;}
-function vDashboard(){return `
+let STATE={templates:[],deals:[],loaded:false};
+let view='dashboard',selTpl=null,wizardStep=1;
+const TITLES={dashboard:["Dashboard","Your deals and templates at a glance."],redlines:["Redlines","Every draft you've generated."],templates:["Templates","Your property form leases."],settings:["Settings & billing","Manage your account and security."],wizard:["New redline","Turn a deal's terms into a tracked-changes draft."]};
+function esc(s){return (s==null?'':String(s)).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}
+function prettify(t){return String(t).replace(/_/g,' ').replace(/\\b\\w/g,c=>c.toUpperCase());}
+function statusTag(s){const m={done:["done","Ready"],review:["review","In review"],draft:["draft","Draft"]};const x=m[s]||m.done;return `<span class="tag ${x[0]}"><span class="d"></span>${x[1]}</span>`;}
+async function loadData(){try{const[t,d]=await Promise.all([fetch('/api/templates').then(r=>r.json()),fetch('/api/deals').then(r=>r.json())]);STATE.templates=Array.isArray(t)?t:[];STATE.deals=Array.isArray(d)?d:[];}catch(e){}STATE.loaded=true;render();}
+function go(v){view=v;if(v==='wizard'){wizardStep=1;selTpl=null;}document.querySelectorAll('.side-link[data-nav]').forEach(l=>l.classList.toggle('active',l.dataset.nav===v));const t=TITLES[v]||TITLES.dashboard;document.getElementById('pageTitle').textContent=t[0];document.getElementById('pageSub').textContent=t[1];render();document.querySelector('.main').scrollTo(0,0);}
+function render(){document.getElementById('appContent').innerHTML=({dashboard:vDashboard,redlines:vRedlines,templates:vTemplates,settings:vSettings,wizard:vWizard}[view]||vDashboard)();}
+function dealRows(list){if(!STATE.loaded)return `<tr><td colspan="4" class="muted" style="padding:22px 16px">Loading…</td></tr>`;if(!list.length)return `<tr><td colspan="4" class="muted" style="padding:22px 16px">No redlines yet. Click <b>New redline</b> to create your first.</td></tr>`;
+  return list.map(d=>`<tr><td style="font-weight:600">${esc(d.name)}</td><td class="muted">${esc(d.prop)}</td><td class="muted">${d.date}</td><td><div style="display:flex;align-items:center;gap:12px">${statusTag(d.status)}<button class="xbtn" title="Delete" onclick="delDeal(${d.id})">✕</button></div></td></tr>`).join('');}
+function vDashboard(){const d=STATE.deals;return `
   <div class="cards">
-    <div class="stat"><div class="lbl">Redlines this month</div><div class="val">38</div><div class="delta up">▲ 24% vs. May</div></div>
-    <div class="stat"><div class="lbl">Active templates</div><div class="val">5</div><div class="delta flat">across 5 properties</div></div>
-    <div class="stat"><div class="lbl">Avg. draft time</div><div class="val">3m</div><div class="delta up">▼ from ~3 hrs</div></div>
-    <div class="stat"><div class="lbl">Est. counsel hrs saved</div><div class="val">112</div><div class="delta up">▲ this quarter</div></div></div>
-  <div class="panel"><div class="panel-head"><h3>Recent redlines</h3><button class="btn btn-outline btn-sm" onclick="go('redlines')">View all</button></div>
-    <div class="panel-body"><table><thead><tr><th>Deal</th><th>Property</th><th>Created</th><th>By</th><th>Status</th></tr></thead><tbody>
-    ${REDLINES.map(r=>`<tr class="row" onclick="go('wizard')"><td style="font-weight:600">${r.deal}</td><td class="muted">${r.prop}</td><td class="muted">${r.date}</td><td class="muted">${r.by}</td><td>${statusTag(r.status)}</td></tr>`).join('')}
-    </tbody></table></div></div>
-  <div class="panel"><div class="panel-head"><h3>Start a new redline</h3></div>
-    <div class="panel-body" style="padding:20px"><div style="display:flex;gap:14px;align-items:center;color:var(--muted);font-size:14px">Pick a property, upload the form lease, confirm the terms, and download the tracked-changes draft.<button class="btn btn-primary" style="margin-left:auto" onclick="go('wizard')">+ New redline</button></div></div></div>`;}
+    <div class="stat"><div class="lbl">Total redlines</div><div class="val">${d.length}</div><div class="delta flat">all time</div></div>
+    <div class="stat"><div class="lbl">Templates</div><div class="val">${STATE.templates.length}</div><div class="delta flat">form leases</div></div>
+    <div class="stat"><div class="lbl">Ready</div><div class="val">${d.filter(x=>x.status==='done').length}</div><div class="delta up">finalized drafts</div></div>
+    <div class="stat"><div class="lbl">In review</div><div class="val">${d.filter(x=>x.status==='review').length}</div><div class="delta flat">with counsel</div></div></div>
+  <div class="panel"><div class="panel-head"><h3>Recent redlines</h3><button class="btn btn-primary btn-sm" onclick="go('wizard')">+ New redline</button></div>
+    <div class="panel-body"><table><thead><tr><th>Deal</th><th>Property</th><th>Created</th><th>Status</th></tr></thead><tbody>${dealRows(d.slice(0,8))}</tbody></table></div></div>`;}
 function vRedlines(){return `<div class="panel"><div class="panel-head"><h3>All redlines</h3><button class="btn btn-primary btn-sm" onclick="go('wizard')">+ New redline</button></div>
-  <div class="panel-body"><table><thead><tr><th>Deal</th><th>Property</th><th>Created</th><th>By</th><th>Status</th></tr></thead><tbody>
-  ${REDLINES.concat(REDLINES.slice(0,2)).map(r=>`<tr class="row" onclick="go('wizard')"><td style="font-weight:600">${r.deal}</td><td class="muted">${r.prop}</td><td class="muted">${r.date}</td><td class="muted">${r.by}</td><td>${statusTag(r.status)}</td></tr>`).join('')}
-  </tbody></table></div></div>`;}
-function vTemplates(){const tn={O:"Office",R:"Retail",I:"Industrial"};return `<div class="tgrid">
-  ${PROPERTIES.map(p=>`<div class="tcard" onclick="go('wizard')"><div class="top"><div class="ficon">${p.type}</div><div><h4>${p.name}</h4><div class="addr">${p.addr}</div></div></div>
-    <div class="meta"><span>${p.redlines} redlines · ${tn[p.type]}</span><span class="tag done"><span class="d"></span>Tagged</span></div></div>`).join('')}
-  <div class="tcard add" onclick="go('wizard')"><div class="plus">+</div><b>Add a property template</b><span>Upload a form lease &amp; tag its terms</span></div></div>`;}
+  <div class="panel-body"><table><thead><tr><th>Deal</th><th>Property</th><th>Created</th><th>Status</th></tr></thead><tbody>${dealRows(STATE.deals)}</tbody></table></div></div>`;}
+function vTemplates(){const cards=STATE.templates.map(t=>`<div class="tcard"><div class="top"><div class="ficon">${esc((t.kind||'O').slice(0,1))}</div><div><h4>${esc(t.name)}</h4><div class="addr">${esc(t.kind)} · ${t.tokens.length} fields</div></div><button class="xbtn" style="margin-left:auto" title="Delete" onclick="delTemplate(${t.id})">✕</button></div>
+    <div class="meta"><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:170px">${esc(t.filename)}</span><span class="tag done"><span class="d"></span>Ready</span></div></div>`).join('');
+  const empty=(!STATE.templates.length&&STATE.loaded)?`<div class="muted" style="grid-column:1/-1;font-size:14px;margin-bottom:2px">No templates yet — upload your first property form lease.</div>`:'';
+  return `<div id="tplMsg"></div><div class="tgrid">${empty}${cards}
+    <div class="tcard add" onclick="showUpload()"><div class="plus">+</div><b>Add a property template</b><span>Upload a form lease (.docx)</span></div></div>`;}
+function showUpload(){document.getElementById('tplMsg').innerHTML=`<div class="panel" style="margin-bottom:18px"><div class="panel-head"><h3>Upload a form lease template</h3></div><div class="panel-body" style="padding:18px 20px">
+  <label class="field-label">Property / template name</label><input id="upName" type="text" placeholder="e.g. 350 Park Avenue" style="width:100%;font-size:14px;border:1px solid var(--line);border-radius:10px;padding:11px 12px">
+  <label class="field-label">Type</label><br><select id="upKind" style="font-size:14px;border:1px solid var(--line);border-radius:10px;padding:10px 12px"><option>Office</option><option>Retail</option><option>Industrial</option><option>Mixed-use</option><option>Other</option></select>
+  <label class="field-label">Form lease (.docx with {{tokens}})</label><input id="upFile" type="file" accept=".docx">
+  <div class="hint">Mark deal-specific spots with tokens like <code>{{base_rent_psf}}</code>. No file? <a href="/sample-lease">download a sample</a>.</div>
+  <div style="margin-top:16px;display:flex;gap:10px"><button class="btn btn-primary" onclick="uploadTemplate()">Upload template</button><button class="btn btn-ghost" onclick="document.getElementById('tplMsg').innerHTML=''">Cancel</button></div>
+  <div id="upErr" style="color:var(--red);font-size:13px;margin-top:10px"></div></div></div>`;document.querySelector('.main').scrollTo(0,0);}
+async function uploadTemplate(){const name=document.getElementById('upName').value.trim();const kind=document.getElementById('upKind').value;const f=document.getElementById('upFile').files[0];const err=document.getElementById('upErr');
+  if(!name){err.textContent='Please enter a name.';return;}if(!f){err.textContent='Please choose a .docx file.';return;}
+  const fd=new FormData();fd.append('name',name);fd.append('kind',kind);fd.append('file',f);fd.append('csrf',CSRF);err.textContent='Uploading…';
+  try{const r=await fetch('/api/templates',{method:'POST',body:fd});if(!r.ok){err.textContent=await r.text();return;}await loadData();go('templates');}catch(e){err.textContent=''+e;}}
+async function delTemplate(id){if(!confirm('Delete this template?'))return;const fd=new FormData();fd.append('id',id);fd.append('csrf',CSRF);await fetch('/api/templates/delete',{method:'POST',body:fd});loadData();}
+async function delDeal(id){if(!confirm('Delete this redline record?'))return;const fd=new FormData();fd.append('id',id);fd.append('csrf',CSRF);await fetch('/api/deals/delete',{method:'POST',body:fd});loadData();}
 function vSettings(){return `
   <div class="plan-box"><div><div class="pname">Free trial</div><div class="ppr">Upgrade anytime · no card on file</div></div><button class="btn">Manage plan</button></div>
-  <div class="panel" style="margin-top:22px"><div class="panel-head"><h3>Usage this period</h3></div>
-    <div class="panel-body" style="padding:20px 22px">
-      <div style="margin-bottom:18px"><div class="k" style="font-weight:600;font-size:14px">Seats <small style="color:var(--muted);font-weight:400">10 included</small></div><div class="bar-track"><div class="bar-fill" style="width:10%"></div></div><div class="muted" style="font-size:12.5px;margin-top:6px">1 of 10 used</div></div>
-      <div><div class="k" style="font-weight:600;font-size:14px">Property templates <small style="color:var(--muted);font-weight:400">15 included</small></div><div class="bar-track"><div class="bar-fill" style="width:33%"></div></div><div class="muted" style="font-size:12.5px;margin-top:6px">5 of 15 used</div></div>
-    </div></div>
-  <div class="panel"><div class="panel-head"><h3>Security</h3></div><div class="panel-body" style="padding:6px 22px 14px">
-    <div class="set-row"><div class="k">Data region <small>Where your documents are stored</small></div><span class="muted">Your cloud tenant</span></div>
+  <div class="panel" style="margin-top:22px"><div class="panel-head"><h3>Your workspace</h3></div><div class="panel-body" style="padding:6px 22px 14px">
+    <div class="set-row"><div class="k">Templates <small>Property form leases uploaded</small></div><span class="muted">${STATE.templates.length}</span></div>
+    <div class="set-row"><div class="k">Redlines <small>Drafts generated</small></div><span class="muted">${STATE.deals.length}</span></div>
     <div class="set-row"><div class="k">Redline engine <small>Deterministic — no AI on your documents</small></div><span class="tag done"><span class="d"></span>Enabled</span></div>
     <div class="set-row"><div class="k">Single sign-on (SSO) <small>SAML / Okta</small></div><button class="btn btn-outline btn-sm">Configure</button></div>
-    <div class="set-row"><div class="k">Audit log export <small>Every upload &amp; redline</small></div><button class="btn btn-outline btn-sm">Download CSV</button></div>
   </div></div>`;}
-function vWizard(){const bar=`<div class="steps-bar">${[["1","Property"],["2","Form lease"],["3","Confirm terms"],["4","Redline"]].map((s,i)=>{const n=i+1;const cls=n<wizardStep?'done':(n===wizardStep?'active':'');const line=i<3?`<div class="sline ${n<wizardStep?'fill':''}"></div>`:'';return `<div class="sbubble ${cls}"><div class="num">${n<wizardStep?'✓':n}</div><div class="stxt">${s[1]}</div></div>${line}`;}).join('')}</div>`;
+function vWizard(){
+  if(STATE.loaded&&!STATE.templates.length)return `<div class="wbox"><h2>Add a template first</h2><p class="wsub">Upload your property's form lease so Draftease has something to redline.</p><button class="btn btn-primary" onclick="go('templates')">Go to Templates →</button></div>`;
+  const labels=["Property","Terms","Redline"];const bar=`<div class="steps-bar">${labels.map((s,i)=>{const n=i+1;const cls=n<wizardStep?'done':(n===wizardStep?'active':'');const line=i<labels.length-1?`<div class="sline ${n<wizardStep?'fill':''}"></div>`:'';return `<div class="sbubble ${cls}"><div class="num">${n<wizardStep?'✓':n}</div><div class="stxt">${s}</div></div>${line}`;}).join('')}</div>`;
   return `<div class="wizard">${bar}<div id="wstep">${wStepBody()}</div></div>`;}
 function wStepBody(){
-  if(wizardStep===1)return `<div class="wbox"><h2>Which property is this deal for?</h2><p class="wsub">We'll use that property's form lease as the starting document.</p>
-    <div class="choose">${PROPERTIES.map(p=>`<div class="choice ${selProp===p.id?'sel':''}" onclick="pickProp(${p.id})"><div class="ficon">${p.type}</div><div><h4>${p.name}</h4><div class="addr">${p.addr}</div></div><div class="rd"></div></div>`).join('')}</div>
-    <div class="wfoot"><button class="btn btn-ghost" onclick="go('dashboard')">Cancel</button><button class="btn btn-primary" ${selProp?'':'disabled style="opacity:.5;pointer-events:none"'} onclick="wNext()">Continue →</button></div></div>`;
-  if(wizardStep===2)return `<div class="wbox"><h2>Upload your form lease</h2><p class="wsub">Upload the property's form lease (a .docx containing {{tokens}}). It stays in your cloud.</p>
-    <input type="file" id="leaseInput" accept=".docx" style="display:none" onchange="onLease(this)">
-    <div class="drop" onclick="document.getElementById('leaseInput').click()"><div class="dic">⬆️</div><h4>Drop your form lease here</h4><p>or click to browse · .docx</p></div>
-    ${leaseFile?`<div class="uploaded"><div class="fi">DOCX</div><div><div class="nm">${leaseFile.name}</div><div class="mt">${Math.max(1,Math.round(leaseFile.size/1024))} KB · ready</div></div><div class="ok">✓ Ready</div></div>`:''}
-    <div style="font-size:12.5px;color:var(--muted);margin-top:13px">No file handy? <a style="color:var(--brand);font-weight:600" href="#" onclick="useSampleLease(event)">Use the sample form lease</a> &nbsp;·&nbsp; <a style="color:var(--brand);font-weight:600" href="/sample-lease">download sample lease</a> &nbsp;·&nbsp; <a style="color:var(--brand);font-weight:600" href="/sample-loi">sample LOI (PDF)</a></div>
-    <div class="wfoot"><button class="btn btn-ghost" onclick="wBack()">← Back</button><button class="btn btn-primary" ${leaseFile?'':'disabled style="opacity:.5;pointer-events:none"'} onclick="wNext()">Confirm terms →</button></div></div>`;
-  if(wizardStep===3)return `<div class="wbox"><h2>Confirm the deal terms</h2><p class="wsub">These would be read from the signed LOI. Review and edit before drafting — nothing is auto-filed.</p>
+  if(wizardStep===1)return `<div class="wbox"><h2>Which property is this deal for?</h2><p class="wsub">We'll redline that property's stored form lease.</p>
+    <div class="choose">${STATE.templates.map(t=>`<div class="choice ${selTpl===t.id?'sel':''}" onclick="pickTpl(${t.id})"><div class="ficon">${esc((t.kind||'O').slice(0,1))}</div><div><h4>${esc(t.name)}</h4><div class="addr">${esc(t.kind)} · ${t.tokens.length} fields</div></div><div class="rd"></div></div>`).join('')}</div>
+    <div class="wfoot"><button class="btn btn-ghost" onclick="go('dashboard')">Cancel</button><button class="btn btn-primary" ${selTpl?'':'disabled style="opacity:.5;pointer-events:none"'} onclick="wNext()">Continue →</button></div></div>`;
+  if(wizardStep===2){const t=STATE.templates.find(x=>x.id===selTpl)||{tokens:[]};const toks=t.tokens.length?t.tokens:Object.keys(FULLTERMS);
+    return `<div class="wbox"><h2>Confirm the deal terms</h2><p class="wsub">Fill the values for ${esc(t.name||'')}. These would be read from the signed LOI.</p>
     <div class="extract-note">🔒 <div>The redline is generated by deterministic software in your cloud — your lease is never sent to an external AI.</div></div>
-    <div class="terms-table"><div class="tr"><div class="lbl">Term</div><div class="lbl">Value (editable)</div><div class="lbl" style="text-align:center">Confidence</div></div>
-      ${TERMS.map(t=>`<div class="tr"><div class="lbl">${t.lbl}</div><input data-token="${t.token}" value="${t.val}"><div class="conf ${t.conf}">${t.conf==='hi'?'High':'Review'}</div></div>`).join('')}</div>
-    <div class="wfoot"><button class="btn btn-ghost" onclick="wBack()">← Back</button><button class="btn btn-primary" onclick="wNext()">Generate redline →</button></div></div>`;
-  const p=PROPERTIES.find(x=>x.id===selProp)||PROPERTIES[0];const g=(k,d)=>editedTerms[k]||d;
-  return `<div class="wbox"><h2>Redline ready</h2><p class="wsub">${p.name} form lease, modified to the deal terms. Download the tracked-changes Word document below.</p>
+    <div class="terms-table"><div class="tr"><div class="lbl">Term</div><div class="lbl">Value</div><div class="lbl" style="text-align:center">Field</div></div>
+      ${toks.map(tok=>`<div class="tr"><div class="lbl">${esc(prettify(tok))}</div><input data-token="${esc(tok)}" value="${esc(FULLTERMS[tok]||'')}"><div class="conf hi" style="font-size:10px">${esc(tok)}</div></div>`).join('')}</div>
+    <div class="wfoot"><button class="btn btn-ghost" onclick="wBack()">← Back</button><button class="btn btn-primary" onclick="genFromTemplate(event)">Generate redline →</button></div></div>`;}
+  return `<div class="wbox"><h2>Redline ready ✓</h2><p class="wsub">Your tracked-changes Word document has downloaded, and the deal was added to your dashboard.</p>
     <div class="warn-band">⚠️ <div>This is an automated <b>first draft</b>. Have a licensed attorney review and finalize before execution.</div></div>
-    <div class="redline-doc">
-      <h4>Article 1 — Premises &amp; Rent</h4>
-      1.1  The Premises consist of <span class="del">[NN]</span><span class="ins">${g('rentable_sf','18,400')}</span> rentable square feet.<br>
-      1.2  Base Rent shall be <span class="del">$00.00</span><span class="ins">${g('base_rent_psf','$72.50')}</span> per rentable square foot per annum.<br>
-      1.3  The Term shall be <span class="del">[NN] months</span><span class="ins">${g('term_months','87')} months</span>, commencing <span class="del">[DATE]</span><span class="ins">${g('commencement_date','September 1, 2026')}</span>.
-      <h4>Article 2 — Concessions</h4>
-      2.1  Tenant shall receive <span class="del">[NN]</span><span class="ins">${g('free_rent_months','four (4)')}</span> months of abated Base Rent.<br>
-      2.2  Landlord shall provide an improvement allowance of <span class="del">$00.00</span><span class="ins">${g('ti_allowance_psf','$95.00')}</span> per RSF.
-      <h4>Article 3 — Security &amp; Options</h4>
-      3.1  Tenant shall deposit <span class="del">$00,000</span><span class="ins">${g('security_deposit','$220,000.00')}</span> as security.<br>
-      3.2  Tenant shall have <span class="del">[none]</span><span class="ins">${g('renewal_option','one (1) option to renew for five (5) years at fair market value')}</span>.
-    </div>
-    <div class="wfoot"><button class="btn btn-ghost" onclick="wBack()">← Back</button>
-      <button class="btn btn-primary" onclick="genDownload(event)">⬇ Download .docx redline</button></div></div>`;
-}
-function pickProp(id){selProp=id;document.getElementById('wstep').innerHTML=wStepBody();}
-function onLease(inp){leaseFile=inp.files[0]||null;document.getElementById('wstep').innerHTML=wStepBody();}
-async function useSampleLease(e){e.preventDefault();try{const r=await fetch('/sample-lease');const b=await r.blob();leaseFile=new File([b],'sample_form_lease.docx',{type:b.type});document.getElementById('wstep').innerHTML=wStepBody();}catch(err){alert('Could not load sample: '+err);}}
-function captureTerms(){document.querySelectorAll('#wstep [data-token]').forEach(i=>{editedTerms[i.dataset.token]=i.value;});}
-function renderWizard(){document.getElementById('appContent').innerHTML=vWizard();}
-function wNext(){if(wizardStep===3)captureTerms();wizardStep=Math.min(4,wizardStep+1);renderWizard();}
-function wBack(){wizardStep=Math.max(1,wizardStep-1);renderWizard();}
-async function genDownload(e){const btn=e.target;if(!leaseFile){alert('Please upload a form lease first (step 2).');return;}
+    <div class="wfoot"><button class="btn btn-outline" onclick="go('wizard')">+ Another redline</button><button class="btn btn-primary" onclick="go('dashboard')">Go to dashboard →</button></div></div>`;}
+function pickTpl(id){selTpl=id;document.getElementById('wstep').innerHTML=wStepBody();}
+function wNext(){wizardStep=Math.min(3,wizardStep+1);document.getElementById('appContent').innerHTML=vWizard();}
+function wBack(){wizardStep=Math.max(1,wizardStep-1);document.getElementById('appContent').innerHTML=vWizard();}
+async function genFromTemplate(e){const btn=e.target;const inputs=document.querySelectorAll('#wstep [data-token]');const terms={};inputs.forEach(i=>terms[i.dataset.token]=i.value);
   const old=btn.textContent;btn.textContent='Generating…';btn.style.opacity='.7';
-  try{const fd=new FormData();fd.append('lease',leaseFile);fd.append('terms',JSON.stringify(Object.assign({},FULLTERMS,editedTerms)));fd.append('csrf',CSRF);
-    const r=await fetch('/redline',{method:'POST',body:fd});
-    if(!r.ok){const t=await r.text();alert('Error generating redline: '+t);btn.textContent=old;btn.style.opacity='1';return;}
-    const blob=await r.blob();const url=URL.createObjectURL(blob);const a=document.createElement('a');
-    const base=leaseFile.name.endsWith('.docx')?leaseFile.name.slice(0,-5):leaseFile.name;
-    a.href=url;a.download=base+'_redline.docx';document.body.appendChild(a);a.click();a.remove();URL.revokeObjectURL(url);
-    btn.textContent='✓ Downloaded';btn.style.opacity='1';
-  }catch(err){alert('Error: '+err);btn.textContent=old;btn.style.opacity='1';}
-}
-go('dashboard');
+  try{const fd=new FormData();fd.append('template_id',selTpl);fd.append('terms',JSON.stringify(terms));fd.append('csrf',CSRF);
+    const r=await fetch('/api/redline-from-template',{method:'POST',body:fd});
+    if(!r.ok){alert('Error: '+await r.text());btn.textContent=old;btn.style.opacity='1';return;}
+    const blob=await r.blob();const url=URL.createObjectURL(blob);const a=document.createElement('a');const t=STATE.templates.find(x=>x.id===selTpl);
+    a.href=url;a.download=(t?t.name.replace(/[^a-z0-9]+/gi,'_'):'lease')+'_redline.docx';document.body.appendChild(a);a.click();a.remove();URL.revokeObjectURL(url);
+    await loadData();view='wizard';wizardStep=3;document.getElementById('appContent').innerHTML=vWizard();
+  }catch(err){alert('Error: '+err);btn.textContent=old;btn.style.opacity='1';}}
+loadData();
 </script>
 """
 
@@ -726,3 +690,94 @@ async def redline(request: Request, lease: UploadFile = File(...),
         "Content-Disposition": f'attachment; filename="{out_name}"',
         "X-Draftease-Applied": str(len(report["applied"])),
     })
+
+
+# --------------------------------------------------------------------------- #
+# API: templates & deals (used by the app shell)
+# --------------------------------------------------------------------------- #
+def _require(request: Request):
+    u = current_user(request)
+    if not u:
+        raise HTTPException(401, "Please sign in.")
+    return u
+
+
+@app.get("/api/templates")
+def api_templates(request: Request):
+    return JSONResponse(auth.list_templates(_require(request).id))
+
+
+@app.post("/api/templates")
+async def api_template_create(request: Request, name: str = Form(...),
+                              kind: str = Form("Office"), csrf: str = Form(...),
+                              file: UploadFile = File(...)):
+    u = _require(request)
+    if not check_csrf(request, csrf):
+        raise HTTPException(400, "Session expired — reload the page.")
+    if not file.filename.lower().endswith(".docx"):
+        raise HTTPException(400, "Please upload a .docx form lease.")
+    raw = await file.read()
+    if len(raw) > MAX_BYTES:
+        raise HTTPException(413, "File too large (15 MB max).")
+    with tempfile.TemporaryDirectory() as d:
+        p = os.path.join(d, "t.docx")
+        with open(p, "wb") as fh:
+            fh.write(raw)
+        try:
+            toks = extract_tokens(p)
+        except Exception as exc:  # noqa: BLE001
+            raise HTTPException(422, f"Could not read that .docx: {exc}")
+    return JSONResponse(auth.create_template(u.id, name, kind, file.filename, raw, toks))
+
+
+@app.post("/api/templates/delete")
+def api_template_delete(request: Request, id: int = Form(...), csrf: str = Form(...)):
+    u = _require(request)
+    if not check_csrf(request, csrf):
+        raise HTTPException(400, "Session expired.")
+    auth.delete_template(u.id, id)
+    return JSONResponse({"ok": True})
+
+
+@app.get("/api/deals")
+def api_deals(request: Request):
+    return JSONResponse(auth.list_deals(_require(request).id))
+
+
+@app.post("/api/deals/delete")
+def api_deal_delete(request: Request, id: int = Form(...), csrf: str = Form(...)):
+    u = _require(request)
+    if not check_csrf(request, csrf):
+        raise HTTPException(400, "Session expired.")
+    auth.delete_deal(u.id, id)
+    return JSONResponse({"ok": True})
+
+
+@app.post("/api/redline-from-template")
+def api_redline_from_template(request: Request, template_id: int = Form(...),
+                              terms: str = Form(...), csrf: str = Form(...)):
+    u = _require(request)
+    if not check_csrf(request, csrf):
+        raise HTTPException(400, "Session expired — reload the page.")
+    blob = auth.get_template_blob(u.id, template_id)
+    if not blob:
+        raise HTTPException(404, "Template not found.")
+    tpl_name, data, _toks = blob
+    try:
+        terms_dict = json.loads(terms)
+    except json.JSONDecodeError as exc:
+        raise HTTPException(400, f"Bad terms: {exc}")
+    with tempfile.TemporaryDirectory() as d:
+        ip, op = os.path.join(d, "in.docx"), os.path.join(d, "out.docx")
+        with open(ip, "wb") as fh:
+            fh.write(data)
+        try:
+            generate_redline(ip, terms_dict, op, author="Draftease")
+        except Exception as exc:  # noqa: BLE001
+            raise HTTPException(422, f"Could not process the lease: {exc}")
+        out = open(op, "rb").read()
+    deal_name = (terms_dict.get("tenant") or "").strip() or "New redline"
+    auth.create_deal(u.id, deal_name, tpl_name, "done")
+    fn = re.sub(r"[^A-Za-z0-9]+", "_", tpl_name).strip("_") + "_redline.docx"
+    return StreamingResponse(io.BytesIO(out), media_type=DOCX_MIME,
+        headers={"Content-Disposition": f'attachment; filename="{fn}"'})

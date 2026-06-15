@@ -249,6 +249,19 @@ def _sanitize(path: str) -> None:
     shutil.move(tmp, path)
 
 
+def extract_tokens(template_path: str) -> list:
+    """Return the ordered, unique list of {{token}} names found in a .docx."""
+    document = Document(template_path)
+    seen, out = set(), []
+    for p in _iter_paragraphs(document):
+        for m in TOKEN_RE.finditer(p.text or ""):
+            name = m.group(1)
+            if name not in seen:
+                seen.add(name)
+                out.append(name)
+    return out
+
+
 if __name__ == "__main__":
     import json
     import sys

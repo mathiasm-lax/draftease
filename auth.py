@@ -12,11 +12,13 @@ managed Postgres and add multi-tenant columns without touching the web layer.
 from __future__ import annotations
 
 import datetime as _dt
+import json as _json
 import os
 import re
 
 import bcrypt
-from sqlalchemy import Boolean, DateTime, String, create_engine, select
+from sqlalchemy import (Boolean, DateTime, Integer, LargeBinary, String, Text,
+                        create_engine, delete, select)
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column
 
 def _normalize_db_url(url: str) -> str:
@@ -55,8 +57,100 @@ class User(Base):
     )
 
 
+class Template(Base):
+    __tablename__ = "templates"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(Integer, index=True)
+    name: Mapped[str] = mapped_column(String(200))
+    kind: Mapped[str] = mapped_column(String(40), default="Office")
+    filename: Mapped[str] = mapped_column(String(260))
+    data: Mapped[bytes] = mapped_column(LargeBinary)
+    tokens: Mapped[str] = mapped_column(Text, default="[]")
+    created_at: Mapped[_dt.datetime] = mapped_column(
+        DateTime, default=lambda: _dt.datetime.now(_dt.timezone.utc))
+
+
+class Deal(Base):
+    __tablename__ = "deals"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(Integer, index=True)
+    name: Mapped[str] = mapped_column(String(200))
+    prop: Mapped[str] = mapped_column(String(200), default="")
+    status: Mapped[str] = mapped_column(String(20), default="done")
+    created_at: Mapped[_dt.datetime] = mapped_column(
+        DateTime, default=lambda: _dt.datetime.now(_dt.timezone.utc))
+
+
 def init_db() -> None:
     Base.metadata.create_all(_engine)
+
+
+# --------------------------------------------------------------------------- #
+# templates
+# --------------------------------------------------------------------------- #
+def _tpl_dict(t: "Template") -> dict:
+    return {"id": t.id, "name": t.name, "kind": t.kind, "filename": t.filename,
+            "tokens": _json.loads(t.tokens or "[]"),
+            "created": t.created_at.strftime("%b %d, %Y") if t.created_at else ""}
+
+
+def create_template(user_id: int, name: str, kind: str, filename: str,
+                    data: bytes, tokens: list) -> dict:
+    with Session(_engine) as s:
+        t = Template(user_id=user_id, name=name.strip() or "Untitled", kind=kind or "Office",
+                     filename=filename, data=data, tokens=_json.dumps(tokens))
+        s.add(t); s.commit(); s.refresh(t)
+        return _tpl_dict(t)
+
+
+def list_templates(user_id: int) -> list:
+    with Session(_engine) as s:
+        rows = s.scalars(select(Template).where(Template.user_id == user_id)
+                         .order_by(Template.created_at.desc())).all()
+        return [_tpl_dict(t) for t in rows]
+
+
+def get_template_blob(user_id: int, tid: int):
+    """Return (name, data_bytes, tokens_list) or None."""
+    with Session(_engine) as s:
+        t = s.get(Template, tid)
+        if not t or t.user_id != user_id:
+            return None
+        return t.name, t.data, _json.loads(t.tokens or "[]")
+
+
+def delete_template(user_id: int, tid: int) -> None:
+    with Session(_engine) as s:
+        s.execute(delete(Template).where(Template.id == tid, Template.user_id == user_id))
+        s.commit()
+
+
+# --------------------------------------------------------------------------- #
+# deals
+# --------------------------------------------------------------------------- #
+def _deal_dict(d: "Deal") -> dict:
+    return {"id": d.id, "name": d.name, "prop": d.prop, "status": d.status,
+            "date": d.created_at.strftime("%b %d, %Y") if d.created_at else ""}
+
+
+def create_deal(user_id: int, name: str, prop: str, status: str = "done") -> dict:
+    with Session(_engine) as s:
+        d = Deal(user_id=user_id, name=name.strip() or "New redline", prop=prop, status=status)
+        s.add(d); s.commit(); s.refresh(d)
+        return _deal_dict(d)
+
+
+def list_deals(user_id: int) -> list:
+    with Session(_engine) as s:
+        rows = s.scalars(select(Deal).where(Deal.user_id == user_id)
+                         .order_by(Deal.created_at.desc())).all()
+        return [_deal_dict(d) for d in rows]
+
+
+def delete_deal(user_id: int, did: int) -> None:
+    with Session(_engine) as s:
+        s.execute(delete(Deal).where(Deal.id == did, Deal.user_id == user_id))
+        s.commit()
 
 
 # --------------------------------------------------------------------------- #
