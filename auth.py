@@ -81,8 +81,86 @@ class Deal(Base):
         DateTime, default=lambda: _dt.datetime.now(_dt.timezone.utc))
 
 
+TRIAL_CREDITS = 3
+
+
+class Billing(Base):
+    __tablename__ = "billing"
+    user_id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    plan: Mapped[str] = mapped_column(String(20), default="trial")
+    credits: Mapped[int] = mapped_column(Integer, default=TRIAL_CREDITS)
+    stripe_customer_id: Mapped[str] = mapped_column(String(80), default="")
+    stripe_subscription_id: Mapped[str] = mapped_column(String(80), default="")
+
+
 def init_db() -> None:
     Base.metadata.create_all(_engine)
+
+
+# --------------------------------------------------------------------------- #
+# billing
+# --------------------------------------------------------------------------- #
+def _get_or_create_billing(s, user_id: int) -> "Billing":
+    b = s.get(Billing, user_id)
+    if not b:
+        b = Billing(user_id=user_id)
+        s.add(b)
+        s.commit()
+        s.refresh(b)
+    return b
+
+
+def billing_dict(user_id: int) -> dict:
+    with Session(_engine) as s:
+        b = _get_or_create_billing(s, user_id)
+        return {"plan": b.plan, "credits": b.credits}
+
+
+def has_access(user_id: int) -> bool:
+    with Session(_engine) as s:
+        b = _get_or_create_billing(s, user_id)
+        return b.plan == "unlimited" or b.credits > 0
+
+
+def consume_credit(user_id: int) -> None:
+    with Session(_engine) as s:
+        b = _get_or_create_billing(s, user_id)
+        if b.plan != "unlimited" and b.credits > 0:
+            b.credits -= 1
+            s.commit()
+
+
+def add_credits(user_id: int, n: int, customer_id: str = "") -> None:
+    with Session(_engine) as s:
+        b = _get_or_create_billing(s, user_id)
+        b.credits += int(n)
+        if customer_id:
+            b.stripe_customer_id = customer_id
+        if b.plan == "trial":
+            b.plan = "payg"
+        s.commit()
+
+
+def set_unlimited(user_id: int, subscription_id: str = "", customer_id: str = "") -> None:
+    with Session(_engine) as s:
+        b = _get_or_create_billing(s, user_id)
+        b.plan = "unlimited"
+        if subscription_id:
+            b.stripe_subscription_id = subscription_id
+        if customer_id:
+            b.stripe_customer_id = customer_id
+        s.commit()
+
+
+def cancel_unlimited_by_sub(subscription_id: str) -> None:
+    if not subscription_id:
+        return
+    with Session(_engine) as s:
+        b = s.scalar(select(Billing).where(Billing.stripe_subscription_id == subscription_id))
+        if b:
+            b.plan = "payg" if b.credits > 0 else "trial"
+            b.stripe_subscription_id = ""
+            s.commit()
 
 
 # --------------------------------------------------------------------------- #

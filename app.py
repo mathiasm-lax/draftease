@@ -23,6 +23,25 @@ MAX_BYTES = 15 * 1024 * 1024
 ALLOW_SIGNUP = os.environ.get("DRAFTEASE_ALLOW_SIGNUP", "true").lower() == "true"
 HTTPS_ONLY = os.environ.get("DRAFTEASE_HTTPS_ONLY", "false").lower() == "true"
 
+# --- Stripe (billing) ---
+STRIPE_SECRET_KEY = os.environ.get("STRIPE_SECRET_KEY", "")
+STRIPE_WEBHOOK_SECRET = os.environ.get("STRIPE_WEBHOOK_SECRET", "")
+BILLING_ENABLED = bool(STRIPE_SECRET_KEY)
+if BILLING_ENABLED:
+    import stripe
+    stripe.api_key = STRIPE_SECRET_KEY
+
+# plan -> Stripe Checkout config (amounts in cents). Prices defined inline so you
+# only need a secret key — no need to pre-create Products in the Stripe dashboard.
+PLANS = {
+    "single": {"label": "Single lease", "amount": 1000, "mode": "payment",
+               "credits": 1, "name": "Draftease — single lease"},
+    "payg": {"label": "Pay as you go", "amount": 5000, "mode": "payment",
+             "credits": 1, "name": "Draftease — one contract redline"},
+    "unlimited": {"label": "Unlimited (monthly)", "amount": 19900, "mode": "subscription",
+                  "name": "Draftease Unlimited"},
+}
+
 
 def _secret_key() -> str:
     key = os.environ.get("DRAFTEASE_SECRET_KEY")
@@ -425,7 +444,8 @@ const TITLES={dashboard:["Dashboard","Your deals and templates at a glance."],re
 function esc(s){return (s==null?'':String(s)).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}
 function prettify(t){return String(t).replace(/_/g,' ').replace(/\\b\\w/g,c=>c.toUpperCase());}
 function statusTag(s){const m={done:["done","Ready"],review:["review","In review"],draft:["draft","Draft"]};const x=m[s]||m.done;return `<span class="tag ${x[0]}"><span class="d"></span>${x[1]}</span>`;}
-async function loadData(){try{const[t,d]=await Promise.all([fetch('/api/templates').then(r=>r.json()),fetch('/api/deals').then(r=>r.json())]);STATE.templates=Array.isArray(t)?t:[];STATE.deals=Array.isArray(d)?d:[];}catch(e){}STATE.loaded=true;render();}
+async function loadData(){try{const[t,d,b]=await Promise.all([fetch('/api/templates').then(r=>r.json()),fetch('/api/deals').then(r=>r.json()),fetch('/api/billing').then(r=>r.json())]);STATE.templates=Array.isArray(t)?t:[];STATE.deals=Array.isArray(d)?d:[];STATE.billing=b||{};}catch(e){}STATE.loaded=true;render();}
+async function startCheckout(plan){if(!(STATE.billing&&STATE.billing.enabled)){toast('Online checkout is not set up yet.');return;}const fd=new FormData();fd.append('plan',plan);fd.append('csrf',CSRF);try{const r=await fetch('/api/checkout',{method:'POST',body:fd});const j=await r.json();if(r.ok&&j.url){window.location=j.url;}else{toast(j.detail||'Could not start checkout.');}}catch(e){toast('Checkout error.');}}
 function go(v){view=v;if(v==='wizard'){wizardStep=1;selTpl=null;}document.querySelectorAll('.side-link[data-nav]').forEach(l=>l.classList.toggle('active',l.dataset.nav===v));const t=TITLES[v]||TITLES.dashboard;document.getElementById('pageTitle').textContent=t[0];document.getElementById('pageSub').textContent=t[1];render();document.querySelector('.main').scrollTo(0,0);}
 function render(){document.getElementById('appContent').innerHTML=({dashboard:vDashboard,redlines:vRedlines,templates:vTemplates,settings:vSettings,plans:vPlans,wizard:vWizard}[view]||vDashboard)();}
 function dealRows(list){if(!STATE.loaded)return `<tr><td colspan="4" class="muted" style="padding:22px 16px">Loading…</td></tr>`;if(!list.length)return `<tr><td colspan="4" class="muted" style="padding:22px 16px">No redlines yet. Click <b>New redline</b> to create your first.</td></tr>`;
@@ -466,17 +486,21 @@ function vSettings(){return `
     <div class="set-row"><div class="k">Redline engine <small>Deterministic — no AI on your documents</small></div><span class="tag done"><span class="d"></span>Enabled</span></div>
     <div class="set-row"><div class="k">Single sign-on (SSO) <small>SAML / Okta</small></div><button class="btn btn-outline btn-sm" onclick="toast('SSO configuration is coming soon.')">Configure</button></div>
   </div></div>`;}
-function vPlans(){const plans=[
-    {n:"Single lease",a:"$10",u:"/lease",d:"Try it on one deal — no commitment.",f:["1 lease redline","Your own form template","Word tracked-changes output"],pop:false},
-    {n:"Pay as you go",a:"$50",u:"/contract",d:"For occasional deals across properties.",f:["$50 per redline, any contract","Unlimited templates","No monthly fee"],pop:false},
-    {n:"Unlimited",a:"$199",u:"/mo",d:"For active owners closing regularly.",f:["Unlimited contracts & redlines","Unlimited templates & seats","Audit log & exports"],pop:true}];
-  return `<div style="margin-bottom:18px;color:var(--muted);font-size:14px">You're on the <b style="color:var(--ink)">Free trial</b>. Pick a plan when you're ready — you only pay when you generate real redlines.</div>
+function vPlans(){const b=STATE.billing||{plan:'trial',credits:0,enabled:false};
+  const plans=[
+    {id:'single',n:"Single lease",a:"$10",u:"/lease",d:"Try it on one deal — no commitment.",f:["1 lease redline","Your own form template","Word tracked-changes output"],pop:false},
+    {id:'payg',n:"Pay as you go",a:"$50",u:"/contract",d:"For occasional deals across properties.",f:["$50 per redline, any contract","Unlimited templates","No monthly fee"],pop:false},
+    {id:'unlimited',n:"Unlimited",a:"$199",u:"/mo",d:"For active owners closing regularly.",f:["Unlimited contracts & redlines","Unlimited templates & seats","Audit log & exports"],pop:true}];
+  const planName=b.plan==='unlimited'?'Unlimited':(b.plan==='payg'?'Pay as you go':'Free trial');
+  const status=b.plan==='unlimited'?'active — unlimited redlines':`${b.credits} redline credit${b.credits===1?'':'s'} remaining`;
+  const note=b.enabled?'':' <span style="color:var(--amber)">· Online checkout is not set up yet (add your Stripe keys — see the setup guide).</span>';
+  return `<div style="margin-bottom:18px;color:var(--muted);font-size:14px">Current plan: <b style="color:var(--ink)">${planName}</b> · ${status}.${note}</div>
   <div class="tgrid">${plans.map(p=>`<div class="tcard" style="cursor:default${p.pop?';border:2px solid var(--brand)':''}">
       <h4 style="margin:0 0 4px;font-size:16px">${p.n}${p.pop?' <span class="tag done" style="font-size:10px;vertical-align:middle"><span class="d"></span>Best value</span>':''}</h4>
       <div style="font-size:32px;font-weight:800;letter-spacing:-.02em">${p.a}<span style="font-size:14px;color:var(--muted);font-weight:500">${p.u}</span></div>
       <div class="addr" style="margin:6px 0 14px">${p.d}</div>
       <div style="font-size:13px;color:var(--ink-2);margin-bottom:16px">${p.f.map(x=>`<div style="margin-bottom:7px">✓ ${x}</div>`).join('')}</div>
-      <button class="btn ${p.pop?'btn-primary':'btn-outline'} btn-block" onclick="toast('Secure checkout is coming soon. Payments are not enabled yet.')">Choose ${p.n}</button></div>`).join('')}</div>
+      <button class="btn ${p.pop?'btn-primary':'btn-outline'} btn-block" onclick="startCheckout('${p.id}')">${p.id==='unlimited'?'Subscribe':'Buy'} — ${p.a}${p.u}</button></div>`).join('')}</div>
   <div class="panel" style="margin-top:22px"><div class="panel-body" style="padding:16px 20px;color:var(--muted);font-size:13.5px;line-height:1.6"><b style="color:var(--ink-2)">How we compare:</b> the leading lease-drafting platform charges $250 per lease plus $100 per amendment after a ~6-week onboarding. Draftease is well over 30% cheaper at every level, with no onboarding project.</div></div>`;}
 function vWizard(){
   if(STATE.loaded&&!STATE.templates.length)return `<div class="wbox"><h2>Add a template first</h2><p class="wsub">Upload your property's form lease so Draftease has something to redline.</p><button class="btn btn-primary" onclick="go('templates')">Go to Templates →</button></div>`;
@@ -502,12 +526,14 @@ async function genFromTemplate(e){const btn=e.target;const inputs=document.query
   const old=btn.textContent;btn.textContent='Generating…';btn.style.opacity='.7';
   try{const fd=new FormData();fd.append('template_id',selTpl);fd.append('terms',JSON.stringify(terms));fd.append('csrf',CSRF);
     const r=await fetch('/api/redline-from-template',{method:'POST',body:fd});
-    if(!r.ok){alert('Error: '+await r.text());btn.textContent=old;btn.style.opacity='1';return;}
+    if(!r.ok){const msg=await r.text();btn.textContent=old;btn.style.opacity='1';if(r.status===402){toast('You are out of credits — choose a plan.');go('plans');}else{alert('Error: '+msg);}return;}
     const blob=await r.blob();const url=URL.createObjectURL(blob);const a=document.createElement('a');const t=STATE.templates.find(x=>x.id===selTpl);
     a.href=url;a.download=(t?t.name.replace(/[^a-z0-9]+/gi,'_'):'lease')+'_redline.docx';document.body.appendChild(a);a.click();a.remove();URL.revokeObjectURL(url);
     await loadData();view='wizard';wizardStep=3;document.getElementById('appContent').innerHTML=vWizard();toast('Redline generated ✓');
   }catch(err){alert('Error: '+err);btn.textContent=old;btn.style.opacity='1';}}
 loadData();
+if(location.search.indexOf('billing=success')>=0){toast('Payment received — updating your plan…');setTimeout(loadData,2500);go('plans');history.replaceState({},'','/');}
+else if(location.search.indexOf('billing=cancel')>=0){history.replaceState({},'','/');}
 </script>
 """
 
@@ -799,6 +825,8 @@ def api_redline_from_template(request: Request, template_id: int = Form(...),
     u = _require(request)
     if not check_csrf(request, csrf):
         raise HTTPException(400, "Session expired — reload the page.")
+    if BILLING_ENABLED and not auth.has_access(u.id):
+        raise HTTPException(402, "You're out of redline credits. Choose a plan to keep generating.")
     blob = auth.get_template_blob(u.id, template_id)
     if not blob:
         raise HTTPException(404, "Template not found.")
@@ -818,6 +846,90 @@ def api_redline_from_template(request: Request, template_id: int = Form(...),
         out = open(op, "rb").read()
     deal_name = (terms_dict.get("tenant") or "").strip() or "New redline"
     auth.create_deal(u.id, deal_name, tpl_name, "done")
+    if BILLING_ENABLED:
+        auth.consume_credit(u.id)
     fn = re.sub(r"[^A-Za-z0-9]+", "_", tpl_name).strip("_") + "_redline.docx"
     return StreamingResponse(io.BytesIO(out), media_type=DOCX_MIME,
         headers={"Content-Disposition": f'attachment; filename="{fn}"'})
+
+
+# --------------------------------------------------------------------------- #
+# Stripe billing
+# --------------------------------------------------------------------------- #
+@app.get("/api/billing")
+def api_billing(request: Request):
+    u = _require(request)
+    b = auth.billing_dict(u.id)
+    b["enabled"] = BILLING_ENABLED
+    return JSONResponse(b)
+
+
+@app.post("/api/checkout")
+def api_checkout(request: Request, plan: str = Form(...), csrf: str = Form(...)):
+    u = _require(request)
+    if not check_csrf(request, csrf):
+        raise HTTPException(400, "Session expired — reload the page.")
+    if not BILLING_ENABLED:
+        raise HTTPException(503, "Online checkout isn't set up yet.")
+    cfg = PLANS.get(plan)
+    if not cfg:
+        raise HTTPException(400, "Unknown plan.")
+    base = str(request.base_url).rstrip("/")
+    price = {"currency": "usd", "unit_amount": cfg["amount"],
+             "product_data": {"name": cfg["name"]}}
+    if cfg["mode"] == "subscription":
+        price["recurring"] = {"interval": "month"}
+    try:
+        session = stripe.checkout.Session.create(
+            mode=cfg["mode"],
+            line_items=[{"price_data": price, "quantity": 1}],
+            success_url=base + "/billing/success?session_id={CHECKOUT_SESSION_ID}",
+            cancel_url=base + "/billing/cancel",
+            client_reference_id=str(u.id),
+            customer_email=u.email,
+            metadata={"user_id": str(u.id), "plan": plan},
+            subscription_data=({"metadata": {"user_id": str(u.id), "plan": plan}}
+                               if cfg["mode"] == "subscription" else None),
+        )
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(502, f"Stripe error: {exc}")
+    return JSONResponse({"url": session.url})
+
+
+@app.post("/stripe/webhook")
+async def stripe_webhook(request: Request):
+    if not BILLING_ENABLED:
+        return JSONResponse({"ok": True})
+    payload = await request.body()
+    sig = request.headers.get("stripe-signature", "")
+    try:
+        event = stripe.Webhook.construct_event(payload, sig, STRIPE_WEBHOOK_SECRET)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(400, f"Webhook signature error: {exc}")
+    etype = event["type"]
+    obj = event["data"]["object"]
+    if etype == "checkout.session.completed":
+        meta = obj.get("metadata") or {}
+        try:
+            uid = int(meta.get("user_id") or obj.get("client_reference_id") or 0)
+        except (TypeError, ValueError):
+            uid = 0
+        plan = meta.get("plan", "")
+        customer = obj.get("customer", "") or ""
+        if uid and plan in ("single", "payg"):
+            auth.add_credits(uid, PLANS[plan]["credits"], customer)
+        elif uid and plan == "unlimited":
+            auth.set_unlimited(uid, obj.get("subscription", "") or "", customer)
+    elif etype == "customer.subscription.deleted":
+        auth.cancel_unlimited_by_sub(obj.get("id", "") or "")
+    return JSONResponse({"received": True})
+
+
+@app.get("/billing/success")
+def billing_success():
+    return RedirectResponse("/?billing=success", status_code=303)
+
+
+@app.get("/billing/cancel")
+def billing_cancel():
+    return RedirectResponse("/?billing=cancel", status_code=303)
