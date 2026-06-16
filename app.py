@@ -353,14 +353,17 @@ MARKETING = """
   </div></div>
 </div></div></section>
 <section class="section" id="pricing"><div class="mkt">
-  <div class="sec-head"><div class="sec-tag">Pricing</div><h2>Simple monthly plans</h2><p>Save the first-draft hours. Start free, upgrade when you're ready.</p></div>
+  <div class="sec-head"><div class="sec-tag">Pricing</div><h2>Pay per deal, or go unlimited</h2><p>Start with a single lease. No setup fees, no onboarding project, no surprises.</p></div>
   <div class="pricing">
-    <div class="price"><h3>Starter</h3><div class="desc">For a single owner or small brokerage getting started.</div><div class="amt">$49<span>/mo</span></div>
-      <ul><li>1 property template</li><li>Up to 10 redlines / mo</li><li>2 seats</li><li>Email support</li></ul><a class="btn btn-outline btn-block" href="/signup">Start free</a></div>
-    <div class="price pop"><div class="badge">Most popular</div><h3>Professional</h3><div class="desc">For active owners managing multiple buildings.</div><div class="amt">$199<span>/mo</span></div>
-      <ul><li>Up to 15 property templates</li><li>Unlimited redlines</li><li>10 seats + outside-broker access</li><li>Audit log &amp; exports</li><li>Priority support</li></ul><a class="btn btn-primary btn-block" href="/signup">Start free trial</a></div>
-    <div class="price"><h3>Enterprise</h3><div class="desc">For portfolios with security &amp; isolation needs.</div><div class="amt">Custom</div>
-      <ul><li>Unlimited templates &amp; seats</li><li>Private cloud / dedicated isolation</li><li>SSO &amp; SOC 2 reporting</li><li>Custom DPA</li><li>Dedicated success manager</li></ul><a class="btn btn-outline btn-block" href="/signup">Contact sales</a></div>
+    <div class="price"><h3>Single lease</h3><div class="desc">Try it on one deal — no commitment.</div><div class="amt">$10<span>/lease</span></div>
+      <ul><li>1 lease redline</li><li>Your own form template</li><li>Word tracked-changes output</li><li>Attorney-ready first draft</li></ul><a class="btn btn-outline btn-block" href="/signup">Start with one lease</a></div>
+    <div class="price"><h3>Pay as you go</h3><div class="desc">For occasional deals across properties.</div><div class="amt">$50<span>/contract</span></div>
+      <ul><li>$50 per redline, any contract</li><li>Unlimited templates</li><li>No monthly fee</li><li>Email support</li></ul><a class="btn btn-outline btn-block" href="/signup">Start pay-as-you-go</a></div>
+    <div class="price pop"><div class="badge">Best value</div><h3>Unlimited</h3><div class="desc">For active owners closing regularly.</div><div class="amt">$199<span>/mo</span></div>
+      <ul><li>Unlimited contracts &amp; redlines</li><li>Unlimited templates &amp; seats</li><li>Audit log &amp; exports</li><li>Priority support</li></ul><a class="btn btn-primary btn-block" href="/signup">Go unlimited</a></div>
+  </div>
+  <div style="max-width:780px;margin:34px auto 0;text-align:center;color:var(--muted);font-size:14px;line-height:1.65">
+    <b style="color:var(--ink-2)">How we compare:</b> the leading lease-drafting platform charges <b>$250 per lease</b> plus <b>$100 per amendment</b>, after a roughly six-week onboarding. Draftease starts at <b>$10</b>, never charges more than <b>$50 per contract</b> pay-as-you-go, and goes fully unlimited at $199/mo — well over 30% cheaper at every level, with no onboarding project.
   </div>
 </div></section>
 <div class="cta-band"><h2>Stop paying for blank-page drafting.</h2><p>Generate your first lease redline today.</p><a class="btn btn-primary btn-lg" href="/signup">Start your free trial</a></div>
@@ -418,13 +421,13 @@ function setQuery(v){q=(v||'').trim().toLowerCase();if(view==='dashboard'||view=
 function matchq(s){return !q||String(s).toLowerCase().includes(q);}
 function filteredDeals(){return q?STATE.deals.filter(d=>matchq(d.name)||matchq(d.prop)):STATE.deals;}
 function filteredTemplates(){return q?STATE.templates.filter(t=>matchq(t.name)||matchq(t.kind)):STATE.templates;}
-const TITLES={dashboard:["Dashboard","Your deals and templates at a glance."],redlines:["Redlines","Every draft you've generated."],templates:["Templates","Your property form leases."],settings:["Settings & billing","Manage your account and security."],wizard:["New redline","Turn a deal's terms into a tracked-changes draft."]};
+const TITLES={dashboard:["Dashboard","Your deals and templates at a glance."],redlines:["Redlines","Every draft you've generated."],templates:["Templates","Your property form leases."],settings:["Settings & billing","Manage your account and security."],plans:["Plans & billing","Pay per deal, or go unlimited."],wizard:["New redline","Turn a deal's terms into a tracked-changes draft."]};
 function esc(s){return (s==null?'':String(s)).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}
 function prettify(t){return String(t).replace(/_/g,' ').replace(/\\b\\w/g,c=>c.toUpperCase());}
 function statusTag(s){const m={done:["done","Ready"],review:["review","In review"],draft:["draft","Draft"]};const x=m[s]||m.done;return `<span class="tag ${x[0]}"><span class="d"></span>${x[1]}</span>`;}
 async function loadData(){try{const[t,d]=await Promise.all([fetch('/api/templates').then(r=>r.json()),fetch('/api/deals').then(r=>r.json())]);STATE.templates=Array.isArray(t)?t:[];STATE.deals=Array.isArray(d)?d:[];}catch(e){}STATE.loaded=true;render();}
 function go(v){view=v;if(v==='wizard'){wizardStep=1;selTpl=null;}document.querySelectorAll('.side-link[data-nav]').forEach(l=>l.classList.toggle('active',l.dataset.nav===v));const t=TITLES[v]||TITLES.dashboard;document.getElementById('pageTitle').textContent=t[0];document.getElementById('pageSub').textContent=t[1];render();document.querySelector('.main').scrollTo(0,0);}
-function render(){document.getElementById('appContent').innerHTML=({dashboard:vDashboard,redlines:vRedlines,templates:vTemplates,settings:vSettings,wizard:vWizard}[view]||vDashboard)();}
+function render(){document.getElementById('appContent').innerHTML=({dashboard:vDashboard,redlines:vRedlines,templates:vTemplates,settings:vSettings,plans:vPlans,wizard:vWizard}[view]||vDashboard)();}
 function dealRows(list){if(!STATE.loaded)return `<tr><td colspan="4" class="muted" style="padding:22px 16px">Loading…</td></tr>`;if(!list.length)return `<tr><td colspan="4" class="muted" style="padding:22px 16px">No redlines yet. Click <b>New redline</b> to create your first.</td></tr>`;
   return list.map(d=>`<tr><td style="font-weight:600">${esc(d.name)}</td><td class="muted">${esc(d.prop)}</td><td class="muted">${d.date}</td><td><div style="display:flex;align-items:center;gap:12px">${statusTag(d.status)}<button class="xbtn" title="Delete" onclick="delDeal(${d.id})">✕</button></div></td></tr>`).join('');}
 function vDashboard(){const d=STATE.deals;return `
@@ -456,13 +459,25 @@ async function uploadTemplate(){const name=document.getElementById('upName').val
 async function delTemplate(id){if(!confirm('Delete this template? This cannot be undone.'))return;const fd=new FormData();fd.append('id',id);fd.append('csrf',CSRF);await fetch('/api/templates/delete',{method:'POST',body:fd});await loadData();toast('Template deleted');}
 async function delDeal(id){if(!confirm('Delete this redline record? This cannot be undone.'))return;const fd=new FormData();fd.append('id',id);fd.append('csrf',CSRF);await fetch('/api/deals/delete',{method:'POST',body:fd});await loadData();toast('Redline deleted');}
 function vSettings(){return `
-  <div class="plan-box"><div><div class="pname">Free trial</div><div class="ppr">Upgrade anytime · no card on file</div></div><button class="btn" onclick="toast('Billing &amp; plan management is coming soon.')">Manage plan</button></div>
+  <div class="plan-box"><div><div class="pname">Free trial</div><div class="ppr">Upgrade anytime · no card on file</div></div><button class="btn" onclick="go('plans')">Manage plan</button></div>
   <div class="panel" style="margin-top:22px"><div class="panel-head"><h3>Your workspace</h3></div><div class="panel-body" style="padding:6px 22px 14px">
     <div class="set-row"><div class="k">Templates <small>Property form leases uploaded</small></div><span class="muted">${STATE.templates.length}</span></div>
     <div class="set-row"><div class="k">Redlines <small>Drafts generated</small></div><span class="muted">${STATE.deals.length}</span></div>
     <div class="set-row"><div class="k">Redline engine <small>Deterministic — no AI on your documents</small></div><span class="tag done"><span class="d"></span>Enabled</span></div>
     <div class="set-row"><div class="k">Single sign-on (SSO) <small>SAML / Okta</small></div><button class="btn btn-outline btn-sm" onclick="toast('SSO configuration is coming soon.')">Configure</button></div>
   </div></div>`;}
+function vPlans(){const plans=[
+    {n:"Single lease",a:"$10",u:"/lease",d:"Try it on one deal — no commitment.",f:["1 lease redline","Your own form template","Word tracked-changes output"],pop:false},
+    {n:"Pay as you go",a:"$50",u:"/contract",d:"For occasional deals across properties.",f:["$50 per redline, any contract","Unlimited templates","No monthly fee"],pop:false},
+    {n:"Unlimited",a:"$199",u:"/mo",d:"For active owners closing regularly.",f:["Unlimited contracts & redlines","Unlimited templates & seats","Audit log & exports"],pop:true}];
+  return `<div style="margin-bottom:18px;color:var(--muted);font-size:14px">You're on the <b style="color:var(--ink)">Free trial</b>. Pick a plan when you're ready — you only pay when you generate real redlines.</div>
+  <div class="tgrid">${plans.map(p=>`<div class="tcard" style="cursor:default${p.pop?';border:2px solid var(--brand)':''}">
+      <h4 style="margin:0 0 4px;font-size:16px">${p.n}${p.pop?' <span class="tag done" style="font-size:10px;vertical-align:middle"><span class="d"></span>Best value</span>':''}</h4>
+      <div style="font-size:32px;font-weight:800;letter-spacing:-.02em">${p.a}<span style="font-size:14px;color:var(--muted);font-weight:500">${p.u}</span></div>
+      <div class="addr" style="margin:6px 0 14px">${p.d}</div>
+      <div style="font-size:13px;color:var(--ink-2);margin-bottom:16px">${p.f.map(x=>`<div style="margin-bottom:7px">✓ ${x}</div>`).join('')}</div>
+      <button class="btn ${p.pop?'btn-primary':'btn-outline'} btn-block" onclick="toast('Secure checkout is coming soon. Payments are not enabled yet.')">Choose ${p.n}</button></div>`).join('')}</div>
+  <div class="panel" style="margin-top:22px"><div class="panel-body" style="padding:16px 20px;color:var(--muted);font-size:13.5px;line-height:1.6"><b style="color:var(--ink-2)">How we compare:</b> the leading lease-drafting platform charges $250 per lease plus $100 per amendment after a ~6-week onboarding. Draftease is well over 30% cheaper at every level, with no onboarding project.</div></div>`;}
 function vWizard(){
   if(STATE.loaded&&!STATE.templates.length)return `<div class="wbox"><h2>Add a template first</h2><p class="wsub">Upload your property's form lease so Draftease has something to redline.</p><button class="btn btn-primary" onclick="go('templates')">Go to Templates →</button></div>`;
   const labels=["Property","Terms","Redline"];const bar=`<div class="steps-bar">${labels.map((s,i)=>{const n=i+1;const cls=n<wizardStep?'done':(n===wizardStep?'active':'');const line=i<labels.length-1?`<div class="sline ${n<wizardStep?'fill':''}"></div>`:'';return `<div class="sbubble ${cls}"><div class="num">${n<wizardStep?'✓':n}</div><div class="stxt">${s}</div></div>${line}`;}).join('')}</div>`;
