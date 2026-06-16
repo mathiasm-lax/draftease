@@ -263,6 +263,9 @@ tr.row{cursor:pointer}tr.row:hover td{background:var(--bg-softer)}
 .muted-link{font-size:13.5px;color:var(--muted);margin-top:18px;text-align:center}.muted-link a{color:var(--brand);font-weight:600}
 .err{background:#fdecef;color:#b3243c;border:1px solid #f6c9d2;border-radius:10px;padding:11px 13px;font-size:13.5px;margin-bottom:4px}
 .xbtn{background:none;border:none;color:var(--muted);cursor:pointer;font-size:13px;width:24px;height:24px;border-radius:7px;flex:none}.xbtn:hover{background:#fdecef;color:var(--red)}
+.toast{position:fixed;bottom:26px;left:50%;transform:translateX(-50%) translateY(16px);background:var(--ink);color:#fff;padding:12px 20px;border-radius:11px;font-size:14px;font-weight:500;box-shadow:var(--shadow-lg);opacity:0;pointer-events:none;transition:.25s;z-index:200}
+.toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+.legal{max-width:760px;margin:0 auto;padding:60px 24px}.legal h1{font-size:30px;letter-spacing:-.02em}.legal h2{font-size:18px;margin-top:30px}.legal p{color:var(--ink-2);font-size:15px;line-height:1.7}.legal a.back{color:var(--brand);font-weight:600;font-size:14px}
 .field-label{display:block;font-weight:600;font-size:13.5px;margin:16px 0 8px}.field-label:first-of-type{margin-top:0}
 .content select{font-family:inherit}
 @media(max-width:900px){.nav-links{display:none}h1.hero-h{font-size:40px}.hero-shot .body,.steps,.diff,.pricing,.security,.cards,.tgrid,.choose{grid-template-columns:1fr}.app{grid-template-columns:1fr}.side{display:none}}
@@ -292,7 +295,7 @@ MARKETING = """
   <div class="pill"><span class="dot"></span> Built for landlords &amp; their brokers · Your docs stay in your cloud</div>
   <h1 class="hero-h">Drop in a signed LOI. Get back a <span class="grad">lease redline</span>.</h1>
   <p class="hero-sub">Draftease applies the terms from a signed letter of intent to your property's own form lease and returns a clean, tracked-changes first draft — ready for your attorney. No setup project, no platform to learn.</p>
-  <div class="hero-cta"><a class="btn btn-primary btn-lg" href="/signup">Start free trial</a><a class="btn btn-outline btn-lg" href="/signup">Watch the 60-second demo →</a></div>
+  <div class="hero-cta"><a class="btn btn-primary btn-lg" href="/signup">Start free trial</a><a class="btn btn-outline btn-lg" href="#how">See how it works →</a></div>
   <div class="hero-note"><b>No credit card.</b> Be drafting in minutes — not after a 6-week implementation.</div>
   <div class="hero-shot">
     <div class="bar"><i></i><i></i><i></i><span class="u">app.draftease.com · 350 Park Ave — Lockton Advisors</span></div>
@@ -367,7 +370,7 @@ MARKETING = """
     <div class="foot-cols">
       <div class="foot-col"><h5>Product</h5><a href="#how">How it works</a><a href="#why">Why Draftease</a><a href="#security">Security</a><a href="#pricing">Pricing</a></div>
       <div class="foot-col"><h5>Company</h5><a href="/signup">Get started</a><a href="/login">Log in</a></div>
-      <div class="foot-col"><h5>Legal</h5><a href="#">Terms</a><a href="#">Privacy</a><a href="#">DPA</a></div>
+      <div class="foot-col"><h5>Legal</h5><a href="/legal">Terms</a><a href="/legal">Privacy</a><a href="/legal">Disclaimer</a></div>
     </div>
   </div>
   <div class="disclaimer">Draftease is a document-drafting tool, not a law firm, and does not provide legal advice. Generated redlines are first drafts intended for review and finalization by a licensed attorney. Use of Draftease does not create an attorney-client relationship.</div>
@@ -381,7 +384,7 @@ MARKETING = """
 APP_SHELL = """
 <div class="app" id="app">
   <aside class="side">
-    <div class="logo"><span class="mark">D</span> Draftease</div>
+    <div class="logo" style="cursor:pointer" onclick="go('dashboard')"><span class="mark">D</span> Draftease</div>
     <button class="btn btn-primary new-btn" onclick="go('wizard')">+ New redline</button>
     <div class="nav-group">Workspace</div>
     <div class="side-link active" data-nav="dashboard" onclick="go('dashboard')"><span class="si">▦</span> Dashboard</div>
@@ -398,17 +401,23 @@ APP_SHELL = """
   <div class="main">
     <div class="topbar">
       <div><h1 id="pageTitle">Dashboard</h1><div class="sub" id="pageSub">Welcome back — here's your deal activity.</div></div>
-      <div class="topbar-right"><div class="search">🔎 <input placeholder="Search deals, properties…"></div>
+      <div class="topbar-right"><div class="search">🔎 <input id="searchBox" placeholder="Search deals, templates…" oninput="setQuery(this.value)"></div>
         <button class="btn btn-primary" onclick="go('wizard')">+ New redline</button></div>
     </div>
     <div class="content" id="appContent"></div>
   </div>
 </div>
+<div id="toast" class="toast"></div>
 <script>
 const CSRF="__CSRF__";
 const FULLTERMS=__FULLTERMS__;
 let STATE={templates:[],deals:[],loaded:false};
-let view='dashboard',selTpl=null,wizardStep=1;
+let view='dashboard',selTpl=null,wizardStep=1,q='';
+function toast(msg){const t=document.getElementById('toast');if(!t)return;t.textContent=msg;t.classList.add('show');clearTimeout(window._tt);window._tt=setTimeout(()=>t.classList.remove('show'),2600);}
+function setQuery(v){q=(v||'').trim().toLowerCase();if(view==='dashboard'||view==='redlines'||view==='templates')render();}
+function matchq(s){return !q||String(s).toLowerCase().includes(q);}
+function filteredDeals(){return q?STATE.deals.filter(d=>matchq(d.name)||matchq(d.prop)):STATE.deals;}
+function filteredTemplates(){return q?STATE.templates.filter(t=>matchq(t.name)||matchq(t.kind)):STATE.templates;}
 const TITLES={dashboard:["Dashboard","Your deals and templates at a glance."],redlines:["Redlines","Every draft you've generated."],templates:["Templates","Your property form leases."],settings:["Settings & billing","Manage your account and security."],wizard:["New redline","Turn a deal's terms into a tracked-changes draft."]};
 function esc(s){return (s==null?'':String(s)).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}
 function prettify(t){return String(t).replace(/_/g,' ').replace(/\\b\\w/g,c=>c.toUpperCase());}
@@ -425,10 +434,10 @@ function vDashboard(){const d=STATE.deals;return `
     <div class="stat"><div class="lbl">Ready</div><div class="val">${d.filter(x=>x.status==='done').length}</div><div class="delta up">finalized drafts</div></div>
     <div class="stat"><div class="lbl">In review</div><div class="val">${d.filter(x=>x.status==='review').length}</div><div class="delta flat">with counsel</div></div></div>
   <div class="panel"><div class="panel-head"><h3>Recent redlines</h3><button class="btn btn-primary btn-sm" onclick="go('wizard')">+ New redline</button></div>
-    <div class="panel-body"><table><thead><tr><th>Deal</th><th>Property</th><th>Created</th><th>Status</th></tr></thead><tbody>${dealRows(d.slice(0,8))}</tbody></table></div></div>`;}
+    <div class="panel-body"><table><thead><tr><th>Deal</th><th>Property</th><th>Created</th><th>Status</th></tr></thead><tbody>${dealRows(filteredDeals().slice(0,8))}</tbody></table></div></div>`;}
 function vRedlines(){return `<div class="panel"><div class="panel-head"><h3>All redlines</h3><button class="btn btn-primary btn-sm" onclick="go('wizard')">+ New redline</button></div>
-  <div class="panel-body"><table><thead><tr><th>Deal</th><th>Property</th><th>Created</th><th>Status</th></tr></thead><tbody>${dealRows(STATE.deals)}</tbody></table></div></div>`;}
-function vTemplates(){const cards=STATE.templates.map(t=>`<div class="tcard"><div class="top"><div class="ficon">${esc((t.kind||'O').slice(0,1))}</div><div><h4>${esc(t.name)}</h4><div class="addr">${esc(t.kind)} · ${t.tokens.length} fields</div></div><button class="xbtn" style="margin-left:auto" title="Delete" onclick="delTemplate(${t.id})">✕</button></div>
+  <div class="panel-body"><table><thead><tr><th>Deal</th><th>Property</th><th>Created</th><th>Status</th></tr></thead><tbody>${dealRows(filteredDeals())}</tbody></table></div></div>`;}
+function vTemplates(){const cards=filteredTemplates().map(t=>`<div class="tcard"><div class="top"><div class="ficon">${esc((t.kind||'O').slice(0,1))}</div><div><h4>${esc(t.name)}</h4><div class="addr">${esc(t.kind)} · ${t.tokens.length} fields</div></div><button class="xbtn" style="margin-left:auto" title="Delete" onclick="delTemplate(${t.id})">✕</button></div>
     <div class="meta"><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:170px">${esc(t.filename)}</span><span class="tag done"><span class="d"></span>Ready</span></div></div>`).join('');
   const empty=(!STATE.templates.length&&STATE.loaded)?`<div class="muted" style="grid-column:1/-1;font-size:14px;margin-bottom:2px">No templates yet — upload your first property form lease.</div>`:'';
   return `<div id="tplMsg"></div><div class="tgrid">${empty}${cards}
@@ -443,16 +452,16 @@ function showUpload(){document.getElementById('tplMsg').innerHTML=`<div class="p
 async function uploadTemplate(){const name=document.getElementById('upName').value.trim();const kind=document.getElementById('upKind').value;const f=document.getElementById('upFile').files[0];const err=document.getElementById('upErr');
   if(!name){err.textContent='Please enter a name.';return;}if(!f){err.textContent='Please choose a .docx file.';return;}
   const fd=new FormData();fd.append('name',name);fd.append('kind',kind);fd.append('file',f);fd.append('csrf',CSRF);err.textContent='Uploading…';
-  try{const r=await fetch('/api/templates',{method:'POST',body:fd});if(!r.ok){err.textContent=await r.text();return;}await loadData();go('templates');}catch(e){err.textContent=''+e;}}
-async function delTemplate(id){if(!confirm('Delete this template?'))return;const fd=new FormData();fd.append('id',id);fd.append('csrf',CSRF);await fetch('/api/templates/delete',{method:'POST',body:fd});loadData();}
-async function delDeal(id){if(!confirm('Delete this redline record?'))return;const fd=new FormData();fd.append('id',id);fd.append('csrf',CSRF);await fetch('/api/deals/delete',{method:'POST',body:fd});loadData();}
+  try{const r=await fetch('/api/templates',{method:'POST',body:fd});if(!r.ok){err.textContent=await r.text();return;}await loadData();go('templates');toast('Template uploaded ✓');}catch(e){err.textContent=''+e;}}
+async function delTemplate(id){if(!confirm('Delete this template? This cannot be undone.'))return;const fd=new FormData();fd.append('id',id);fd.append('csrf',CSRF);await fetch('/api/templates/delete',{method:'POST',body:fd});await loadData();toast('Template deleted');}
+async function delDeal(id){if(!confirm('Delete this redline record? This cannot be undone.'))return;const fd=new FormData();fd.append('id',id);fd.append('csrf',CSRF);await fetch('/api/deals/delete',{method:'POST',body:fd});await loadData();toast('Redline deleted');}
 function vSettings(){return `
-  <div class="plan-box"><div><div class="pname">Free trial</div><div class="ppr">Upgrade anytime · no card on file</div></div><button class="btn">Manage plan</button></div>
+  <div class="plan-box"><div><div class="pname">Free trial</div><div class="ppr">Upgrade anytime · no card on file</div></div><button class="btn" onclick="toast('Billing &amp; plan management is coming soon.')">Manage plan</button></div>
   <div class="panel" style="margin-top:22px"><div class="panel-head"><h3>Your workspace</h3></div><div class="panel-body" style="padding:6px 22px 14px">
     <div class="set-row"><div class="k">Templates <small>Property form leases uploaded</small></div><span class="muted">${STATE.templates.length}</span></div>
     <div class="set-row"><div class="k">Redlines <small>Drafts generated</small></div><span class="muted">${STATE.deals.length}</span></div>
     <div class="set-row"><div class="k">Redline engine <small>Deterministic — no AI on your documents</small></div><span class="tag done"><span class="d"></span>Enabled</span></div>
-    <div class="set-row"><div class="k">Single sign-on (SSO) <small>SAML / Okta</small></div><button class="btn btn-outline btn-sm">Configure</button></div>
+    <div class="set-row"><div class="k">Single sign-on (SSO) <small>SAML / Okta</small></div><button class="btn btn-outline btn-sm" onclick="toast('SSO configuration is coming soon.')">Configure</button></div>
   </div></div>`;}
 function vWizard(){
   if(STATE.loaded&&!STATE.templates.length)return `<div class="wbox"><h2>Add a template first</h2><p class="wsub">Upload your property's form lease so Draftease has something to redline.</p><button class="btn btn-primary" onclick="go('templates')">Go to Templates →</button></div>`;
@@ -481,7 +490,7 @@ async function genFromTemplate(e){const btn=e.target;const inputs=document.query
     if(!r.ok){alert('Error: '+await r.text());btn.textContent=old;btn.style.opacity='1';return;}
     const blob=await r.blob();const url=URL.createObjectURL(blob);const a=document.createElement('a');const t=STATE.templates.find(x=>x.id===selTpl);
     a.href=url;a.download=(t?t.name.replace(/[^a-z0-9]+/gi,'_'):'lease')+'_redline.docx';document.body.appendChild(a);a.click();a.remove();URL.revokeObjectURL(url);
-    await loadData();view='wizard';wizardStep=3;document.getElementById('appContent').innerHTML=vWizard();
+    await loadData();view='wizard';wizardStep=3;document.getElementById('appContent').innerHTML=vWizard();toast('Redline generated ✓');
   }catch(err){alert('Error: '+err);btn.textContent=old;btn.style.opacity='1';}}
 loadData();
 </script>
@@ -576,6 +585,22 @@ def _build_sample_loi_pdf() -> bytes:
 @app.get("/health")
 def health():
     return {"status": "ok"}
+
+
+@app.get("/legal", response_class=HTMLResponse)
+def legal():
+    return HTMLResponse(page("""<div class="legal">
+      <a class="logo" href="/" style="margin-bottom:24px"><span class="mark">D</span> Draftease</a>
+      <h1>Terms, Privacy &amp; Disclaimer</h1>
+      <p><a class="back" href="/">← Back to site</a></p>
+      <h2>Not legal advice</h2>
+      <p>Draftease is a document-drafting tool, not a law firm, and does not provide legal advice. Redlines it generates are automated first drafts intended for review and finalization by a licensed attorney. Using Draftease does not create an attorney-client relationship.</p>
+      <h2>Your documents &amp; privacy</h2>
+      <p>Your form leases and the redlines generated from them are processed by deterministic software and are not sent to any third-party AI service. We do not use your documents to train any model. You can export or delete your data on request.</p>
+      <h2>Acceptable use</h2>
+      <p>You are responsible for the content of the documents you upload and for ensuring you have the right to use them. Do not upload material you are not authorized to process.</p>
+      <p style="margin-top:30px"><a class="back" href="/">← Back to site</a></p>
+    </div>""", "Legal · Draftease"))
 
 
 @app.get("/", response_class=HTMLResponse)
