@@ -284,6 +284,15 @@ tr.row{cursor:pointer}tr.row:hover td{background:var(--bg-softer)}
 .xbtn{background:none;border:none;color:var(--muted);cursor:pointer;font-size:13px;width:24px;height:24px;border-radius:7px;flex:none}.xbtn:hover{background:#fdecef;color:var(--red)}
 .toast{position:fixed;bottom:26px;left:50%;transform:translateX(-50%) translateY(16px);background:var(--ink);color:#fff;padding:12px 20px;border-radius:11px;font-size:14px;font-weight:500;box-shadow:var(--shadow-lg);opacity:0;pointer-events:none;transition:.25s;z-index:200}
 .toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+.modal-overlay{position:fixed;inset:0;background:rgba(14,22,38,.45);display:none;align-items:center;justify-content:center;z-index:300;padding:20px}
+.modal-overlay.show{display:flex}
+.modal{background:#fff;border-radius:16px;padding:26px 28px;width:100%;max-width:470px;box-shadow:var(--shadow-lg);max-height:90vh;overflow-y:auto}
+.modal h3{margin:0 0 4px;font-size:19px;letter-spacing:-.01em}
+.modal input[type=text],.modal select{width:100%;font-size:14px;border:1px solid var(--line);border-radius:10px;padding:11px 12px;background:#fff}
+.modal input:focus,.modal select:focus{outline:none;border-color:var(--brand);box-shadow:0 0 0 3px var(--brand-soft)}
+.filepick{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.modal-actions{display:flex;gap:10px;justify-content:flex-end;margin-top:24px}
+.modal-err{background:#fdecef;color:#b3243c;border:1px solid #f6c9d2;border-radius:10px;padding:10px 12px;font-size:13px;margin-top:12px}
 .legal{max-width:760px;margin:0 auto;padding:60px 24px}.legal h1{font-size:30px;letter-spacing:-.02em}.legal h2{font-size:18px;margin-top:30px}.legal p{color:var(--ink-2);font-size:15px;line-height:1.7}.legal a.back{color:var(--brand);font-weight:600;font-size:14px}
 .field-label{display:block;font-weight:600;font-size:13.5px;margin:16px 0 8px}.field-label:first-of-type{margin-top:0}
 .content select{font-family:inherit}
@@ -430,6 +439,28 @@ APP_SHELL = """
   </div>
 </div>
 <div id="toast" class="toast"></div>
+<div id="modal" class="modal-overlay">
+  <div class="modal">
+    <h3>Add a property template</h3>
+    <div class="muted" style="font-size:13px;margin-bottom:2px">Upload your form lease — we’ll detect its {{tokens}} automatically.</div>
+    <label class="field-label">Property / template name</label>
+    <input id="upName" type="text" placeholder="e.g. 350 Park Avenue" autocomplete="off">
+    <label class="field-label">Type</label>
+    <select id="upKind"><option>Office</option><option>Retail</option><option>Industrial</option><option>Mixed-use</option><option>Other</option></select>
+    <label class="field-label">Form lease (.docx with {{tokens}})</label>
+    <div class="filepick">
+      <button type="button" class="btn btn-outline" onclick="document.getElementById('upFile').click()">Choose .docx file…</button>
+      <span id="upFileName" class="muted" style="font-size:13px">No file chosen</span>
+    </div>
+    <input id="upFile" type="file" accept=".docx" style="display:none" onchange="onUpFile()">
+    <div class="hint" style="margin-top:8px">No file handy? <a href="/sample-lease">Download a sample</a> to try it.</div>
+    <div id="upErr" class="modal-err" style="display:none"></div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" onclick="closeUploadModal()">Cancel</button>
+      <button class="btn btn-primary" id="upBtn" onclick="uploadTemplate()">Upload template</button>
+    </div>
+  </div>
+</div>
 <script>
 const CSRF="__CSRF__";
 const FULLTERMS=__FULLTERMS__;
@@ -465,17 +496,17 @@ function vTemplates(){const cards=filteredTemplates().map(t=>`<div class="tcard"
   const empty=(!STATE.templates.length&&STATE.loaded)?`<div class="muted" style="grid-column:1/-1;font-size:14px;margin-bottom:2px">No templates yet — upload your first property form lease.</div>`:'';
   return `<div id="tplMsg"></div><div class="tgrid">${empty}${cards}
     <div class="tcard add" onclick="showUpload()"><div class="plus">+</div><b>Add a property template</b><span>Upload a form lease (.docx)</span></div></div>`;}
-function showUpload(){document.getElementById('tplMsg').innerHTML=`<div class="panel" style="margin-bottom:18px"><div class="panel-head"><h3>Upload a form lease template</h3></div><div class="panel-body" style="padding:18px 20px">
-  <label class="field-label">Property / template name</label><input id="upName" type="text" placeholder="e.g. 350 Park Avenue" style="width:100%;font-size:14px;border:1px solid var(--line);border-radius:10px;padding:11px 12px">
-  <label class="field-label">Type</label><br><select id="upKind" style="font-size:14px;border:1px solid var(--line);border-radius:10px;padding:10px 12px"><option>Office</option><option>Retail</option><option>Industrial</option><option>Mixed-use</option><option>Other</option></select>
-  <label class="field-label">Form lease (.docx with {{tokens}})</label><input id="upFile" type="file" accept=".docx">
-  <div class="hint">Mark deal-specific spots with tokens like <code>{{base_rent_psf}}</code>. No file? <a href="/sample-lease">download a sample</a>.</div>
-  <div style="margin-top:16px;display:flex;gap:10px"><button class="btn btn-primary" onclick="uploadTemplate()">Upload template</button><button class="btn btn-ghost" onclick="document.getElementById('tplMsg').innerHTML=''">Cancel</button></div>
-  <div id="upErr" style="color:var(--red);font-size:13px;margin-top:10px"></div></div></div>`;document.querySelector('.main').scrollTo(0,0);}
-async function uploadTemplate(){const name=document.getElementById('upName').value.trim();const kind=document.getElementById('upKind').value;const f=document.getElementById('upFile').files[0];const err=document.getElementById('upErr');
-  if(!name){err.textContent='Please enter a name.';return;}if(!f){err.textContent='Please choose a .docx file.';return;}
-  const fd=new FormData();fd.append('name',name);fd.append('kind',kind);fd.append('file',f);fd.append('csrf',CSRF);err.textContent='Uploading…';
-  try{const r=await fetch('/api/templates',{method:'POST',body:fd});if(!r.ok){err.textContent=await r.text();return;}await loadData();go('templates');toast('Template uploaded ✓');}catch(e){err.textContent=''+e;}}
+function showUpload(){const m=document.getElementById('modal');document.getElementById('upName').value='';document.getElementById('upKind').value='Office';document.getElementById('upFile').value='';const lbl=document.getElementById('upFileName');lbl.textContent='No file chosen';lbl.style.color='';const e=document.getElementById('upErr');e.style.display='none';e.textContent='';document.getElementById('upBtn').textContent='Upload template';m.classList.add('show');setTimeout(()=>document.getElementById('upName').focus(),50);}
+function closeUploadModal(){document.getElementById('modal').classList.remove('show');}
+function onUpFile(){const f=document.getElementById('upFile').files[0];const lbl=document.getElementById('upFileName');if(f){lbl.textContent=f.name;lbl.style.color='var(--ink)';const n=document.getElementById('upName');if(!n.value.trim()){n.value=f.name.replace(/\\.docx$/i,'');}}else{lbl.textContent='No file chosen';lbl.style.color='';}}
+async function uploadTemplate(){const name=document.getElementById('upName').value.trim();const kind=document.getElementById('upKind').value;const f=document.getElementById('upFile').files[0];const err=document.getElementById('upErr');const btn=document.getElementById('upBtn');
+  const showErr=(m)=>{err.textContent=m;err.style.display='block';};
+  if(!name){showErr('Please enter a name.');return;}if(!f){showErr('Please choose a .docx file.');return;}
+  const fd=new FormData();fd.append('name',name);fd.append('kind',kind);fd.append('file',f);fd.append('csrf',CSRF);
+  err.style.display='none';btn.textContent='Uploading…';btn.style.opacity='.7';
+  try{const r=await fetch('/api/templates',{method:'POST',body:fd});if(!r.ok){showErr(await r.text());btn.textContent='Upload template';btn.style.opacity='1';return;}
+    closeUploadModal();btn.style.opacity='1';await loadData();go('templates');toast('Template uploaded ✓');
+  }catch(e){showErr(''+e);btn.textContent='Upload template';btn.style.opacity='1';}}
 async function delTemplate(id){if(!confirm('Delete this template? This cannot be undone.'))return;const fd=new FormData();fd.append('id',id);fd.append('csrf',CSRF);await fetch('/api/templates/delete',{method:'POST',body:fd});await loadData();toast('Template deleted');}
 async function delDeal(id){if(!confirm('Delete this redline record? This cannot be undone.'))return;const fd=new FormData();fd.append('id',id);fd.append('csrf',CSRF);await fetch('/api/deals/delete',{method:'POST',body:fd});await loadData();toast('Redline deleted');}
 function vSettings(){return `
