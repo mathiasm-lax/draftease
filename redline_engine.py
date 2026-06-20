@@ -249,6 +249,83 @@ def _sanitize(path: str) -> None:
     shutil.move(tmp, path)
 
 
+def generate_redline_direct(template_path: str, changes, output_path: str,
+                            author: str = "Draftease", date: str | None = None) -> dict:
+    """Redline a lease *without* tokens: each (current_phrase -> new_value) becomes a
+    tracked deletion of the current text + insertion of the new value."""
+    if date is None:
+        date = _dt.datetime.now(_dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    document = Document(template_path)
+    counter = [0]
+    applied = []
+    reps = sorted([((c or "").strip(), (n or "")) for c, n in changes
+                   if (c or "").strip() and (n or "") != "" and (c or "").strip() != (n or "")],
+                  key=lambda x: -len(x[0]))
+    skip = {qn("w:tab"), qn("w:br"), qn("w:drawing"), qn("w:cr"), qn("w:pict")}
+    for p in _iter_paragraphs(document):
+        el = p._p
+        runs = el.findall(qn("w:r"))
+        if not runs:
+            continue
+        chars, crpr = [], []
+        for r in runs:
+            rpr = r.find(qn("w:rPr"))
+            for t in r.findall(qn("w:t")):
+                for ch in (t.text or ""):
+                    chars.append(ch); crpr.append(rpr)
+        full = "".join(chars)
+        used = [False] * len(full)
+        marks = []
+        for cur, new in reps:
+            start = 0
+            while True:
+                j = full.find(cur, start)
+                if j < 0:
+                    break
+                if not any(used[j:j + len(cur)]):
+                    marks.append((j, j + len(cur), cur, new))
+                    for x in range(j, j + len(cur)):
+                        used[x] = True
+                start = j + len(cur)
+        if not marks:
+            continue
+        if any(child.tag in skip for r in runs for child in r):
+            continue
+        marks.sort()
+        nodes = []
+
+        def emit(a, b):
+            i = a
+            while i < b:
+                k = i
+                cur_rpr = crpr[i]
+                while k < b and crpr[k] is cur_rpr:
+                    k += 1
+                nodes.append(_run(full[i:k], cur_rpr))
+                i = k
+
+        pos = 0
+        for s, e, cur, newv in marks:
+            emit(pos, s)
+            rpr = crpr[s] if s < len(crpr) else None
+            counter[0] += 1
+            nodes.append(_del(cur, rpr, counter[0], author, date))
+            counter[0] += 1
+            nodes.append(_ins(newv, rpr, counter[0], author, date))
+            applied.append({"from": cur, "to": newv})
+            pos = e
+        emit(pos, len(full))
+        at = list(el).index(runs[0])
+        for n in nodes:
+            el.insert(at, n); at += 1
+        for r in runs:
+            el.remove(r)
+
+    document.save(output_path)
+    _sanitize(output_path)
+    return {"applied": applied}
+
+
 def extract_tokens(template_path: str) -> list:
     """Return the ordered, unique list of {{token}} names found in a .docx."""
     document = Document(template_path)

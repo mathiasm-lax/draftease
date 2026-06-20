@@ -81,6 +81,17 @@ class Deal(Base):
         DateTime, default=lambda: _dt.datetime.now(_dt.timezone.utc))
 
 
+class Loi(Base):
+    __tablename__ = "lois"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(Integer, index=True)
+    name: Mapped[str] = mapped_column(String(200))
+    filename: Mapped[str] = mapped_column(String(260))
+    data: Mapped[bytes] = mapped_column(LargeBinary)
+    created_at: Mapped[_dt.datetime] = mapped_column(
+        DateTime, default=lambda: _dt.datetime.now(_dt.timezone.utc))
+
+
 TRIAL_CREDITS = 3
 
 
@@ -228,6 +239,42 @@ def list_deals(user_id: int) -> list:
 def delete_deal(user_id: int, did: int) -> None:
     with Session(_engine) as s:
         s.execute(delete(Deal).where(Deal.id == did, Deal.user_id == user_id))
+        s.commit()
+
+
+# --------------------------------------------------------------------------- #
+# LOIs (stored letters of intent, for the picker)
+# --------------------------------------------------------------------------- #
+def _loi_dict(l: "Loi") -> dict:
+    return {"id": l.id, "name": l.name, "filename": l.filename,
+            "created": l.created_at.strftime("%b %d, %Y") if l.created_at else ""}
+
+
+def create_loi(user_id: int, name: str, filename: str, data: bytes) -> dict:
+    with Session(_engine) as s:
+        l = Loi(user_id=user_id, name=(name or filename or "LOI").strip(), filename=filename, data=data)
+        s.add(l); s.commit(); s.refresh(l)
+        return _loi_dict(l)
+
+
+def list_lois(user_id: int) -> list:
+    with Session(_engine) as s:
+        rows = s.scalars(select(Loi).where(Loi.user_id == user_id)
+                         .order_by(Loi.created_at.desc())).all()
+        return [_loi_dict(l) for l in rows]
+
+
+def get_loi_blob(user_id: int, lid: int):
+    with Session(_engine) as s:
+        l = s.get(Loi, lid)
+        if not l or l.user_id != user_id:
+            return None
+        return l.name, l.data
+
+
+def delete_loi(user_id: int, lid: int) -> None:
+    with Session(_engine) as s:
+        s.execute(delete(Loi).where(Loi.id == lid, Loi.user_id == user_id))
         s.commit()
 
 

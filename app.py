@@ -17,7 +17,7 @@ from starlette.middleware.sessions import SessionMiddleware
 
 import auth
 import tagger
-from redline_engine import extract_tokens, generate_redline
+from redline_engine import extract_tokens, generate_redline, generate_redline_direct
 
 DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 MAX_BYTES = 15 * 1024 * 1024
@@ -111,6 +111,13 @@ a{color:inherit;text-decoration:none}button{font-family:inherit;cursor:pointer;b
 .btn-ghost{color:var(--ink-2)}.btn-ghost:hover{color:var(--ink)}
 .btn-outline{border:1px solid var(--line);color:var(--ink);background:#fff}.btn-outline:hover{border-color:#c9cee0;background:var(--bg-soft)}
 .btn-lg{padding:14px 24px;font-size:15px;border-radius:12px}.btn-sm{padding:7px 13px;font-size:13px;border-radius:9px}.btn-block{width:100%;justify-content:center}
+.btn:disabled{opacity:.5;cursor:default;pointer-events:none}
+.startwrap{min-height:100vh;background:var(--bg-soft)}.startwrap .inner{max-width:860px;margin:0 auto;padding:26px 20px 70px}
+.gin{width:100%;font-size:14px;border:1px solid var(--line);border-radius:10px;padding:11px 12px;margin-top:2px}.gin:focus{outline:none;border-color:var(--brand);box-shadow:0 0 0 3px var(--brand-soft)}
+.planpick{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin:8px 0 18px}
+.planopt{border:1.5px solid var(--line);border-radius:12px;padding:14px;cursor:pointer;font-size:14px;font-weight:600}
+.planopt.sel{border-color:var(--brand);background:var(--brand-soft)}
+.planopt .pa{font-size:22px;font-weight:800;margin-top:6px}.planopt .pa span{font-size:13px;color:var(--muted);font-weight:500}
 .mkt{max-width:1140px;margin:0 auto;padding:0 24px}
 .nav{position:sticky;top:0;z-index:40;background:rgba(255,255,255,.82);backdrop-filter:blur(12px);border-bottom:1px solid var(--line)}
 .nav-in{max-width:1140px;margin:0 auto;padding:14px 24px;display:flex;align-items:center;gap:32px}
@@ -318,13 +325,13 @@ MARKETING = """
 <nav class="nav"><div class="nav-in">
   <div class="logo"><span class="mark">D</span> Draftease</div>
   <div class="nav-links"><a href="#how">How it works</a><a href="#why">Why Draftease</a><a href="#security">Security</a><a href="#pricing">Pricing</a></div>
-  <div class="nav-right"><a class="btn btn-ghost" href="/login">Log in</a><a class="btn btn-primary" href="/signup">Start free trial</a></div>
+  <div class="nav-right"><a class="btn btn-ghost" href="/login">Log in</a><a class="btn btn-primary" href="/start">Start free trial</a></div>
 </div></nav>
 <div class="mkt"><section class="hero">
   <div class="pill"><span class="dot"></span> Built for landlords &amp; their brokers · Your docs stay in your cloud</div>
   <h1 class="hero-h">Drop in a signed LOI. Get back a <span class="grad">lease redline</span>.</h1>
   <p class="hero-sub">Draftease applies the terms from a signed letter of intent to your property's own form lease and returns a clean, tracked-changes first draft — ready for your attorney. No setup project, no platform to learn.</p>
-  <div class="hero-cta"><a class="btn btn-primary btn-lg" href="/signup">Start free trial</a><a class="btn btn-outline btn-lg" href="#how">See how it works →</a></div>
+  <div class="hero-cta"><a class="btn btn-primary btn-lg" href="/start">Start free trial</a><a class="btn btn-outline btn-lg" href="#how">See how it works →</a></div>
   <div class="hero-note"><b>No credit card.</b> Be drafting in minutes — not after a 6-week implementation.</div>
   <div class="hero-shot">
     <div class="bar"><i></i><i></i><i></i><span class="u">app.draftease.com · 350 Park Ave — Lockton Advisors</span></div>
@@ -395,7 +402,7 @@ MARKETING = """
     <b style="color:var(--ink-2)">How we compare:</b> the leading lease-drafting platform charges <b>$250 per lease</b> plus <b>$100 per amendment</b>, after a roughly six-week onboarding. Draftease starts at <b>$10</b>, never charges more than <b>$50 per contract</b> pay-as-you-go, and goes fully unlimited at $199/mo — well over 30% cheaper at every level, with no onboarding project.
   </div>
 </div></section>
-<div class="cta-band"><h2>Stop paying for blank-page drafting.</h2><p>Generate your first lease redline today.</p><a class="btn btn-primary btn-lg" href="/signup">Start your free trial</a></div>
+<div class="cta-band"><h2>Stop paying for blank-page drafting.</h2><p>Generate your first lease redline today.</p><a class="btn btn-primary btn-lg" href="/start">Create a redline</a></div>
 <footer>
   <div class="foot-in">
     <div><div class="logo"><span class="mark">D</span> Draftease</div><p>Lease redlines from your LOIs — securely, in your own cloud.</p></div>
@@ -695,11 +702,177 @@ def _build_sample_loi_pdf() -> bytes:
 
 
 # --------------------------------------------------------------------------- #
+# public 3-step funnel ( /start )
+# --------------------------------------------------------------------------- #
+START_PAGE = """
+<div class="startwrap"><div class="inner">
+  <a class="logo" href="/" style="margin-bottom:22px;display:inline-flex"><span class="mark">D</span> Draftease</a>
+  <div class="steps-bar" id="stSteps"></div>
+  <div id="stBody"></div>
+</div></div>
+<div id="toast" class="toast"></div>
+<script>
+const CSRF0="__CSRF__"; let CSRF="__CSRF__"; const LOGGED_IN=__LOGGED_IN__;
+let STATE={templates:[],lois:[]};
+let step=1, baseMode='', baseTid=null, leaseFile=null, terms=[], loiMode='', loiId=null, loiFile=null, plan='single';
+const LB=["Base lease","LOI & terms","Create redline"];
+function esc(s){return (s==null?'':String(s)).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}
+function prettify(t){return String(t).replace(/_/g,' ').replace(/\\b\\w/g,c=>c.toUpperCase());}
+function toast(m){const t=document.getElementById('toast');t.textContent=m;t.classList.add('show');clearTimeout(window._tt);window._tt=setTimeout(()=>t.classList.remove('show'),2800);}
+function download(blob,nm){const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download=nm;document.body.appendChild(a);a.click();a.remove();URL.revokeObjectURL(url);}
+function renderSteps(){document.getElementById('stSteps').innerHTML=LB.map((s,i)=>{const n=i+1;const cls=n<step?'done':(n===step?'active':'');const line=i<2?`<div class="sline ${n<step?'fill':''}"></div>`:'';return `<div class="sbubble ${cls}"><div class="num">${n<step?'✓':n}</div><div class="stxt">${s}</div></div>${line}`;}).join('');}
+function render(){renderSteps();document.getElementById('stBody').innerHTML=({1:s1,2:s2,3:s3}[step]||s1)();}
+async function loadStart(){try{const[t,l]=await Promise.all([fetch('/api/templates').then(r=>r.ok?r.json():[]),fetch('/api/lois').then(r=>r.ok?r.json():[])]);STATE.templates=Array.isArray(t)?t:[];STATE.lois=Array.isArray(l)?l:[];}catch(e){}render();}
+function s1(){
+  const opts=['<option value="">Choose a template…</option>']
+    .concat(STATE.templates.map(t=>`<option value="t:${t.id}" ${baseMode==='template'&&baseTid===t.id?'selected':''}>${esc(t.name)} (${t.tokens.length} fields)</option>`))
+    .concat([`<option value="upload" ${baseMode==='upload'?'selected':''}>➕ Upload a new lease / template…</option>`]).join('');
+  let extra='';
+  if(baseMode==='upload'){extra=`<input type="file" id="leaseInput" accept=".docx" style="display:none" onchange="onLease()"><div class="drop" style="margin-top:12px" onclick="document.getElementById('leaseInput').click()"><div class="dic">${leaseFile?'📄':'⬆️'}</div><h4>${leaseFile?esc(leaseFile.name):'Drop / choose your lease (.docx)'}</h4><p>${leaseFile?('Found '+terms.length+' standard terms'):'we auto-detect standard terms — no tokens needed'}</p></div><div id="s1err" class="modal-err" style="display:none"></div>`;}
+  const ready=(baseMode==='template'&&baseTid)||(baseMode==='upload'&&leaseFile&&terms.length);
+  return `<div class="wbox"><h2>Step 1 &mdash; Pick the base lease / template</h2><p class="wsub">Choose one of your saved templates, or upload a new lease as the base document.</p>
+    <select class="gin" onchange="onBase(this.value)">${opts}</select>${extra}
+    <div class="wfoot"><a class="btn btn-ghost" href="/">Cancel</a><button class="btn btn-primary" ${ready?'':'disabled'} onclick="step=2;render()">Continue →</button></div></div>`;}
+function onBase(v){if(v==='upload'){baseMode='upload';baseTid=null;terms=[];}
+  else if(v&&v.indexOf('t:')===0){baseMode='template';baseTid=parseInt(v.slice(2));leaseFile=null;const t=STATE.templates.find(x=>x.id===baseTid);terms=((t&&t.tokens)||[]).map(tok=>({token:tok,label:prettify(tok),value:''}));}
+  else{baseMode='';baseTid=null;terms=[];leaseFile=null;}render();}
+async function onLease(){const f=document.getElementById('leaseInput').files[0];if(!f)return;leaseFile=f;terms=[];render();const err=document.getElementById('s1err');
+  const fd=new FormData();fd.append('file',f);
+  try{const r=await fetch('/api/scan',{method:'POST',body:fd});if(!r.ok){if(err){err.textContent=await r.text();err.style.display='block';}return;}const j=await r.json();
+    terms=(j.standard||[]).map(s=>({key:s.key,label:s.label,current:((j.suggestions||{})[s.key]||''),nw:''}));
+  }catch(e){if(err){err.textContent=''+e;err.style.display='block';}}render();}
+function s2(){
+  const opts=['<option value="">No LOI / enter terms manually</option>']
+    .concat(STATE.lois.map(l=>`<option value="l:${l.id}" ${loiMode==='loi'&&loiId===l.id?'selected':''}>${esc(l.name)}</option>`))
+    .concat([`<option value="upload" ${loiMode==='upload'?'selected':''}>➕ Upload a new LOI…</option>`]).join('');
+  let loiExtra='';
+  if(loiMode==='upload'){loiExtra=`<input type="file" id="loiInput" accept=".pdf,.docx" style="display:none" onchange="onLoi()"><div class="drop" style="padding:18px;margin-top:10px" onclick="document.getElementById('loiInput').click()"><div class="dic" style="width:40px;height:40px;font-size:18px">📄</div><h4>${loiFile?esc(loiFile.name):'Choose the signed LOI (PDF or .docx)'}</h4></div>`;}
+  let tbl;
+  if(baseMode==='template'){
+    tbl=`<div class="terms-table" style="margin-top:16px"><div class="tr" style="grid-template-columns:1fr 1.4fr"><div class="lbl">Term</div><div class="lbl">New value (from LOI)</div></div>${terms.map((t,i)=>`<div class="tr" style="grid-template-columns:1fr 1.4fr"><div class="lbl">${esc(t.label)}</div><input value="${esc(t.value)}" placeholder="blank = unchanged" oninput="terms[${i}].value=this.value"></div>`).join('')}</div>`;
+  }else{
+    tbl=`<div class="terms-table" style="margin-top:16px"><div class="tr" style="grid-template-columns:1fr 1fr 1fr"><div class="lbl">Term</div><div class="lbl">Current (in lease)</div><div class="lbl">New (from LOI)</div></div>${terms.map((t,i)=>`<div class="tr" style="grid-template-columns:1fr 1fr 1fr"><div class="lbl">${esc(t.label)}</div><input value="${esc(t.current)}" oninput="terms[${i}].current=this.value"><input value="${esc(t.nw)}" placeholder="blank = no change" oninput="terms[${i}].nw=this.value"></div>`).join('')}</div>`;
+  }
+  return `<div class="wbox"><h2>Step 2 &mdash; Pick the LOI &amp; new terms</h2><p class="wsub">Choose a saved LOI or upload a new one, then enter the new terms it specifies. (Automatic reading of the LOI is coming with the AI layer; for now, confirm the terms.)</p>
+    <select class="gin" onchange="onLoiSel(this.value)">${opts}</select>${loiExtra}${tbl}
+    <div class="wfoot"><button class="btn btn-ghost" onclick="step=1;render()">← Back</button><button class="btn btn-primary" onclick="step=3;render()">Continue →</button></div></div>`;}
+function onLoiSel(v){if(v==='upload'){loiMode='upload';loiId=null;}else if(v&&v.indexOf('l:')===0){loiMode='loi';loiId=parseInt(v.slice(2));loiFile=null;}else{loiMode='';loiId=null;loiFile=null;}render();}
+function onLoi(){loiFile=document.getElementById('loiInput').files[0]||null;render();}
+function changeCount(){if(baseMode==='template'){return terms.filter(t=>t.value&&t.value.trim()).length;}return terms.filter(t=>t.nw&&t.nw.trim()&&t.current&&t.current.trim()&&t.nw.trim()!==t.current.trim()).length;}
+function dlname(){if(baseMode==='template'){const t=STATE.templates.find(x=>x.id===baseTid);return (((t&&t.name)||'lease').replace(/[^a-z0-9]+/gi,'_'))+'_redline.docx';}return leaseFile.name.replace(/\\.docx$/i,'')+'_redline.docx';}
+function doGenerate(){if(baseMode==='template'){const tt={};terms.forEach(x=>{if(x.value&&x.value.trim())tt[x.token]=x.value.trim();});const fd=new FormData();fd.append('template_id',baseTid);fd.append('terms',JSON.stringify(tt));fd.append('csrf',CSRF);return fetch('/api/redline-from-template',{method:'POST',body:fd});}
+  const ch=terms.filter(x=>x.nw&&x.nw.trim()&&x.current&&x.current.trim()&&x.nw.trim()!==x.current.trim()).map(x=>[x.current.trim(),x.nw.trim()]);const fd=new FormData();fd.append('lease',leaseFile);fd.append('changes',JSON.stringify(ch));fd.append('csrf',CSRF);return fetch('/api/guest-redline',{method:'POST',body:fd});}
+function s3(){const n=changeCount();
+  if(LOGGED_IN){return `<div class="wbox"><h2>Step 3 &mdash; Create redline</h2><p class="wsub">${n} term${n===1?'':'s'} will be applied. We'll produce a Word tracked-changes redline.</p>
+    <div class="wfoot"><button class="btn btn-ghost" onclick="step=2;render()">← Back</button><button class="btn btn-primary" ${n?'':'disabled'} onclick="gen(event)">Generate redline →</button></div></div>`;}
+  const plans=[['payg','Single use','$50','per redline'],['unlimited','Monthly','$199','unlimited']];
+  return `<div class="wbox"><h2>Step 3 &mdash; Create your account</h2><p class="wsub">Register (or sign in) and choose a plan to generate your redline (${n} change${n===1?'':'s'}). New accounts include free trial credits.</p>
+    <div class="planpick" style="grid-template-columns:repeat(2,1fr)">${plans.map(p=>`<div class="planopt ${plan===p[0]?'sel':''}" onclick="plan='${p[0]}';render()">${p[1]}<div class="pa">${p[2]}<span> ${p[3]}</span></div></div>`).join('')}</div>
+    <label class="field-label">Name</label><input id="gName" class="gin" type="text" autocomplete="name">
+    <label class="field-label">Work email</label><input id="gEmail" class="gin" type="email" autocomplete="email">
+    <label class="field-label">Password</label><input id="gPass" class="gin" type="password" autocomplete="new-password"><div class="hint" style="margin-top:6px">At least 8 characters. Already have an account? <a href="/login" style="color:var(--brand);font-weight:600">Sign in</a>.</div>
+    <div id="s3err" class="modal-err" style="display:none"></div>
+    <div class="wfoot"><button class="btn btn-ghost" onclick="step=2;render()">← Back</button><button class="btn btn-primary" ${n?'':'disabled'} onclick="registerAndGen(event)">Create account &amp; generate →</button></div></div>`;}
+async function gen(e){const btn=e.target;if(!changeCount()){toast('Enter at least one new term.');return;}const old=btn.textContent;btn.textContent='Generating…';btn.disabled=true;
+  try{const r=await doGenerate();if(!r.ok){const m=await r.text();toast(r.status===402?'Out of credits — choose a plan.':'Error: '+m);btn.textContent=old;btn.disabled=false;return;}download(await r.blob(),dlname());btn.textContent='✓ Downloaded';toast('Redline generated ✓');}catch(err){toast('Error: '+err);btn.textContent=old;btn.disabled=false;}}
+async function registerAndGen(e){const btn=e.target;const err=document.getElementById('s3err');const show=(m)=>{err.textContent=m;err.style.display='block';btn.textContent='Create account & generate →';btn.disabled=false;};
+  const name=document.getElementById('gName').value.trim();const email=document.getElementById('gEmail').value.trim();const pass=document.getElementById('gPass').value;
+  if(!email||!pass){show('Enter your email and a password.');return;}
+  if(baseMode==='template'){show('Saved templates need an account. Please sign in, or upload a new lease in Step 1.');return;}
+  err.style.display='none';btn.textContent='Creating account…';btn.disabled=true;
+  try{const fd=new FormData();fd.append('name',name);fd.append('email',email);fd.append('password',pass);fd.append('csrf',CSRF);
+    const r=await fetch('/signup',{method:'POST',body:fd});
+    if(!(r.redirected||r.ok)){show('Could not create the account — the email may already be registered. Try signing in.');return;}
+    try{const cr=await fetch('/api/csrf');CSRF=(await cr.json()).csrf;}catch(x){}
+    btn.textContent='Generating…';const r2=await doGenerate();
+    if(!r2.ok){show('Account created, but the redline failed: '+await r2.text());return;}
+    download(await r2.blob(),dlname());btn.textContent='✓ Done — go to dashboard';btn.disabled=false;btn.onclick=function(){location.href='/';};toast('Account created — redline downloaded ✓');
+  }catch(err2){show(''+err2);}}
+loadStart();
+</script>
+"""
+
+
+# --------------------------------------------------------------------------- #
 # routes
 # --------------------------------------------------------------------------- #
 @app.get("/health")
 def health():
     return {"status": "ok"}
+
+
+@app.get("/api/csrf")
+def api_csrf(request: Request):
+    return JSONResponse({"csrf": csrf_token(request)})
+
+
+@app.post("/api/scan")
+async def api_scan(file: UploadFile = File(...)):
+    """Public: detect standard terms / tokens in an uploaded lease. No auth, no storage."""
+    if not file.filename.lower().endswith(".docx"):
+        raise HTTPException(400, "Please upload a .docx lease.")
+    raw = await file.read()
+    if len(raw) > MAX_BYTES:
+        raise HTTPException(413, "File too large (15 MB max).")
+    with tempfile.TemporaryDirectory() as d:
+        p = os.path.join(d, "lease.docx")
+        with open(p, "wb") as fh:
+            fh.write(raw)
+        try:
+            sug = tagger.autodetect(p)
+            toks = extract_tokens(p)
+        except Exception as exc:  # noqa: BLE001
+            raise HTTPException(422, f"Could not read that .docx: {exc}")
+    return JSONResponse({"suggestions": sug, "tokens": toks,
+                         "standard": [{"key": k, "label": lbl} for k, lbl in tagger.STANDARD_TOKENS]})
+
+
+@app.post("/api/guest-redline")
+async def api_guest_redline(request: Request, lease: UploadFile = File(...),
+                            changes: str = Form(...), csrf: str = Form(...)):
+    u = _require(request)
+    if not check_csrf(request, csrf):
+        raise HTTPException(400, "Session expired — reload the page.")
+    if BILLING_ENABLED and not auth.has_access(u.id):
+        raise HTTPException(402, "Out of credits — choose a plan to keep generating.")
+    if not lease.filename.lower().endswith(".docx"):
+        raise HTTPException(400, "Please upload a .docx lease.")
+    try:
+        ch = json.loads(changes)
+    except json.JSONDecodeError as exc:
+        raise HTTPException(400, f"Bad changes: {exc}")
+    pairs = [(c[0], c[1]) for c in ch if isinstance(c, (list, tuple)) and len(c) == 2]
+    if not pairs:
+        raise HTTPException(400, "No term changes provided.")
+    raw = await lease.read()
+    if len(raw) > MAX_BYTES:
+        raise HTTPException(413, "File too large (15 MB max).")
+    with tempfile.TemporaryDirectory() as d:
+        ip, op = os.path.join(d, "in.docx"), os.path.join(d, "out.docx")
+        with open(ip, "wb") as fh:
+            fh.write(raw)
+        try:
+            generate_redline_direct(ip, pairs, op, author="Draftease")
+        except Exception as exc:  # noqa: BLE001
+            raise HTTPException(422, f"Could not redline: {exc}")
+        data = open(op, "rb").read()
+    if BILLING_ENABLED:
+        auth.consume_credit(u.id)
+    nm = os.path.splitext(lease.filename)[0] or "lease"
+    auth.create_deal(u.id, "Redline — " + nm[:60], nm[:80], "done")
+    fn = (re.sub(r"[^A-Za-z0-9]+", "_", nm).strip("_") or "lease") + "_redline.docx"
+    return StreamingResponse(io.BytesIO(data), media_type=DOCX_MIME,
+        headers={"Content-Disposition": f'attachment; filename="{fn}"'})
+
+
+@app.get("/start", response_class=HTMLResponse)
+def start(request: Request):
+    u = current_user(request)
+    body = (START_PAGE
+            .replace("__CSRF__", csrf_token(request))
+            .replace("__LOGGED_IN__", "true" if u else "false")
+            .replace("__NAME__", (u.name or u.email) if u else ""))
+    return HTMLResponse(page(body, "Create a redline · Draftease"))
 
 
 @app.get("/legal", response_class=HTMLResponse)
@@ -944,6 +1117,34 @@ async def api_template_tag(request: Request, name: str = Form(...), kind: str = 
     t = auth.create_template(u.id, name, kind, file.filename, data, toks)
     t["tagged"] = n
     return JSONResponse(t)
+
+
+@app.get("/api/lois")
+def api_lois(request: Request):
+    return JSONResponse(auth.list_lois(_require(request).id))
+
+
+@app.post("/api/lois")
+async def api_loi_create(request: Request, name: str = Form(""), csrf: str = Form(...),
+                         file: UploadFile = File(...)):
+    u = _require(request)
+    if not check_csrf(request, csrf):
+        raise HTTPException(400, "Session expired — reload the page.")
+    if not file.filename.lower().endswith((".pdf", ".docx")):
+        raise HTTPException(400, "Please upload a PDF or .docx LOI.")
+    raw = await file.read()
+    if len(raw) > MAX_BYTES:
+        raise HTTPException(413, "File too large (15 MB max).")
+    return JSONResponse(auth.create_loi(u.id, name or file.filename, file.filename, raw))
+
+
+@app.post("/api/lois/delete")
+def api_loi_delete(request: Request, id: int = Form(...), csrf: str = Form(...)):
+    u = _require(request)
+    if not check_csrf(request, csrf):
+        raise HTTPException(400, "Session expired.")
+    auth.delete_loi(u.id, id)
+    return JSONResponse({"ok": True})
 
 
 @app.get("/api/deals")
