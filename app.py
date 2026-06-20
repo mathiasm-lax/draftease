@@ -491,8 +491,8 @@ function vDashboard(){const d=STATE.deals;return `
     <div class="panel-body"><table><thead><tr><th>Deal</th><th>Property</th><th>Created</th><th>Status</th></tr></thead><tbody>${dealRows(filteredDeals().slice(0,8))}</tbody></table></div></div>`;}
 function vRedlines(){return `<div class="panel"><div class="panel-head"><h3>All redlines</h3><button class="btn btn-primary btn-sm" onclick="go('wizard')">+ New redline</button></div>
   <div class="panel-body"><table><thead><tr><th>Deal</th><th>Property</th><th>Created</th><th>Status</th></tr></thead><tbody>${dealRows(filteredDeals())}</tbody></table></div></div>`;}
-function vTemplates(){const cards=filteredTemplates().map(t=>`<div class="tcard"><div class="top"><div class="ficon">${esc((t.kind||'O').slice(0,1))}</div><div><h4>${esc(t.name)}</h4><div class="addr">${esc(t.kind)} · ${t.tokens.length} fields</div></div><button class="xbtn" style="margin-left:auto" title="Delete" onclick="delTemplate(${t.id})">✕</button></div>
-    <div class="meta"><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:170px">${esc(t.filename)}</span><span class="tag done"><span class="d"></span>Ready</span></div></div>`).join('');
+function vTemplates(){const cards=filteredTemplates().map(t=>`<div class="tcard" style="cursor:pointer" title="Click to open / download this template" onclick="openTemplate(${t.id})"><div class="top"><div class="ficon">${esc((t.kind||'O').slice(0,1))}</div><div><h4>${esc(t.name)}</h4><div class="addr">${esc(t.kind)} · ${t.tokens.length} fields</div></div><button class="xbtn" style="margin-left:auto" title="Delete" onclick="event.stopPropagation();delTemplate(${t.id})">✕</button></div>
+    <div class="meta"><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:160px">${esc(t.filename)}</span><span class="tag done" style="cursor:pointer"><span class="d"></span>Open</span></div></div>`).join('');
   const empty=(!STATE.templates.length&&STATE.loaded)?`<div class="muted" style="grid-column:1/-1;font-size:14px;margin-bottom:2px">No templates yet — upload your first property form lease.</div>`:'';
   return `<div id="tplMsg"></div><div class="tgrid">${empty}${cards}
     <div class="tcard add" onclick="showUpload()"><div class="plus">+</div><b>Add a property template</b><span>Upload a form lease (.docx)</span></div></div>`;}
@@ -508,6 +508,7 @@ async function uploadTemplate(){const name=document.getElementById('upName').val
     closeUploadModal();btn.style.opacity='1';await loadData();go('templates');toast('Template uploaded ✓');
   }catch(e){showErr(''+e);btn.textContent='Upload template';btn.style.opacity='1';}}
 async function delTemplate(id){if(!confirm('Delete this template? This cannot be undone.'))return;const fd=new FormData();fd.append('id',id);fd.append('csrf',CSRF);await fetch('/api/templates/delete',{method:'POST',body:fd});await loadData();toast('Template deleted');}
+async function openTemplate(id){try{const r=await fetch('/api/templates/'+id+'/file');if(!r.ok){toast('Could not open that file.');return;}const b=await r.blob();const t=STATE.templates.find(x=>x.id===id);const url=URL.createObjectURL(b);const a=document.createElement('a');a.href=url;a.download=(((t&&t.name)||'template').replace(/[^a-z0-9]+/gi,'_'))+'.docx';document.body.appendChild(a);a.click();a.remove();URL.revokeObjectURL(url);toast('Template downloaded');}catch(e){toast('Could not open that file.');}}
 async function delDeal(id){if(!confirm('Delete this redline record? This cannot be undone.'))return;const fd=new FormData();fd.append('id',id);fd.append('csrf',CSRF);await fetch('/api/deals/delete',{method:'POST',body:fd});await loadData();toast('Redline deleted');}
 function vSettings(){return `
   <div class="plan-box"><div><div class="pname">Free trial</div><div class="ppr">Upgrade anytime · no card on file</div></div><button class="btn" onclick="go('plans')">Manage plan</button></div>
@@ -834,6 +835,18 @@ def api_template_delete(request: Request, id: int = Form(...), csrf: str = Form(
         raise HTTPException(400, "Session expired.")
     auth.delete_template(u.id, id)
     return JSONResponse({"ok": True})
+
+
+@app.get("/api/templates/{tid}/file")
+def api_template_file(request: Request, tid: int):
+    u = _require(request)
+    blob = auth.get_template_blob(u.id, tid)
+    if not blob:
+        raise HTTPException(404, "Template not found.")
+    name, data, _toks = blob
+    fn = (re.sub(r"[^A-Za-z0-9]+", "_", name).strip("_") or "template") + ".docx"
+    return StreamingResponse(io.BytesIO(data), media_type=DOCX_MIME,
+        headers={"Content-Disposition": f'attachment; filename="{fn}"'})
 
 
 @app.get("/api/deals")
