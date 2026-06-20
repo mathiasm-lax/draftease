@@ -16,6 +16,7 @@ from fastapi.responses import (HTMLResponse, JSONResponse, RedirectResponse,
 from starlette.middleware.sessions import SessionMiddleware
 
 import auth
+import tagger
 from redline_engine import extract_tokens, generate_redline
 
 DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
@@ -461,6 +462,29 @@ APP_SHELL = """
     </div>
   </div>
 </div>
+<div id="tagmodal" class="modal-overlay">
+  <div class="modal" style="max-width:580px">
+    <h3>Tag a clean lease</h3>
+    <div class="muted" style="font-size:13px;margin-bottom:2px">For a lease with no {{tokens}}. We detect standard terms; you confirm the exact text, and we insert the tokens for you.</div>
+    <label class="field-label">Template name</label>
+    <input id="tgName" type="text" placeholder="e.g. 606 - 1155 Lease" autocomplete="off">
+    <label class="field-label">Type</label>
+    <select id="tgKind"><option>Office</option><option>Retail</option><option>Industrial</option><option>Mixed-use</option><option>Other</option></select>
+    <label class="field-label">Lease file (.docx)</label>
+    <div class="filepick">
+      <button type="button" class="btn btn-outline" onclick="document.getElementById('tgFile').click()">Choose .docx file…</button>
+      <span id="tgFileName" class="muted" style="font-size:13px">No file chosen</span>
+      <button type="button" class="btn btn-primary btn-sm" id="tgScanBtn" onclick="scanLease()">Scan for terms</button>
+    </div>
+    <input id="tgFile" type="file" accept=".docx" style="display:none" onchange="onTagFile()">
+    <div id="tgRows" style="margin-top:14px;max-height:46vh;overflow-y:auto"></div>
+    <div id="tgErr" class="modal-err" style="display:none"></div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" onclick="closeTagModal()">Cancel</button>
+      <button class="btn btn-primary" id="tgCreate" onclick="createTagged()" style="opacity:.5;pointer-events:none">Create tagged template</button>
+    </div>
+  </div>
+</div>
 <script>
 const CSRF="__CSRF__";
 const FULLTERMS=__FULLTERMS__;
@@ -495,7 +519,8 @@ function vTemplates(){const cards=filteredTemplates().map(t=>`<div class="tcard"
     <div class="meta"><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:160px">${esc(t.filename)}</span><span class="tag done" style="cursor:pointer"><span class="d"></span>Open</span></div></div>`).join('');
   const empty=(!STATE.templates.length&&STATE.loaded)?`<div class="muted" style="grid-column:1/-1;font-size:14px;margin-bottom:2px">No templates yet — upload your first property form lease.</div>`:'';
   return `<div id="tplMsg"></div><div class="tgrid">${empty}${cards}
-    <div class="tcard add" onclick="showUpload()"><div class="plus">+</div><b>Add a property template</b><span>Upload a form lease (.docx)</span></div></div>`;}
+    <div class="tcard add" onclick="showUpload()"><div class="plus">+</div><b>Add a property template</b><span>Upload a form lease that already has {{tokens}}</span></div>
+    <div class="tcard add" onclick="showTagModal()"><div class="plus">🏷️</div><b>Tag a clean lease</b><span>No tokens? Auto-detect &amp; tag standard terms</span></div></div>`;}
 function showUpload(){const m=document.getElementById('modal');document.getElementById('upName').value='';document.getElementById('upKind').value='Office';document.getElementById('upFile').value='';const lbl=document.getElementById('upFileName');lbl.textContent='No file chosen';lbl.style.color='';const e=document.getElementById('upErr');e.style.display='none';e.textContent='';document.getElementById('upBtn').textContent='Upload template';m.classList.add('show');setTimeout(()=>document.getElementById('upName').focus(),50);}
 function closeUploadModal(){document.getElementById('modal').classList.remove('show');}
 function onUpFile(){const f=document.getElementById('upFile').files[0];const lbl=document.getElementById('upFileName');if(f){lbl.textContent=f.name;lbl.style.color='var(--ink)';const n=document.getElementById('upName');if(!n.value.trim()){n.value=f.name.replace(/\\.docx$/i,'');}}else{lbl.textContent='No file chosen';lbl.style.color='';}}
@@ -509,6 +534,23 @@ async function uploadTemplate(){const name=document.getElementById('upName').val
   }catch(e){showErr(''+e);btn.textContent='Upload template';btn.style.opacity='1';}}
 async function delTemplate(id){if(!confirm('Delete this template? This cannot be undone.'))return;const fd=new FormData();fd.append('id',id);fd.append('csrf',CSRF);await fetch('/api/templates/delete',{method:'POST',body:fd});await loadData();toast('Template deleted');}
 async function openTemplate(id){try{const r=await fetch('/api/templates/'+id+'/file');if(!r.ok){toast('Could not open that file.');return;}const b=await r.blob();const t=STATE.templates.find(x=>x.id===id);const url=URL.createObjectURL(b);const a=document.createElement('a');a.href=url;a.download=(((t&&t.name)||'template').replace(/[^a-z0-9]+/gi,'_'))+'.docx';document.body.appendChild(a);a.click();a.remove();URL.revokeObjectURL(url);toast('Template downloaded');}catch(e){toast('Could not open that file.');}}
+let _tgFile=null;
+function showTagModal(){_tgFile=null;document.getElementById('tgName').value='';document.getElementById('tgKind').value='Office';document.getElementById('tgFile').value='';const lbl=document.getElementById('tgFileName');lbl.textContent='No file chosen';lbl.style.color='';document.getElementById('tgScanBtn').textContent='Scan for terms';document.getElementById('tgRows').innerHTML='<div class="muted" style="font-size:13px">Choose your lease, then click <b>Scan for terms</b>.</div>';const e=document.getElementById('tgErr');e.style.display='none';const c=document.getElementById('tgCreate');c.textContent='Create tagged template';c.style.opacity='.5';c.style.pointerEvents='none';document.getElementById('tagmodal').classList.add('show');setTimeout(()=>document.getElementById('tgName').focus(),50);}
+function closeTagModal(){document.getElementById('tagmodal').classList.remove('show');}
+function onTagFile(){const f=document.getElementById('tgFile').files[0];_tgFile=f||null;const lbl=document.getElementById('tgFileName');if(f){lbl.textContent=f.name;lbl.style.color='var(--ink)';const n=document.getElementById('tgName');if(!n.value.trim())n.value=f.name.replace(/\\.docx$/i,'');}else{lbl.textContent='No file chosen';lbl.style.color='';}}
+async function scanLease(){const err=document.getElementById('tgErr');const show=(m)=>{err.textContent=m;err.style.display='block';};if(!_tgFile){show('Please choose a .docx file first.');return;}
+  const fd=new FormData();fd.append('file',_tgFile);fd.append('csrf',CSRF);err.style.display='none';const sb=document.getElementById('tgScanBtn');sb.textContent='Scanning…';
+  try{const r=await fetch('/api/autotag',{method:'POST',body:fd});if(!r.ok){show(await r.text());sb.textContent='Scan for terms';return;}const j=await r.json();sb.textContent='Re-scan';
+    const rows=(j.standard||[]).map(s=>{const v=((j.suggestions||{})[s.key]||'').replace(/"/g,'&quot;');return `<div style="display:grid;grid-template-columns:140px 1fr;gap:10px;align-items:center;padding:5px 0;border-top:1px solid var(--line-2)"><div style="font-size:13px;color:var(--muted)">${s.label}</div><input data-tk="${s.key}" value="${v}" placeholder="(not found — paste exact text or leave blank)" style="width:100%;font-size:13px;border:1px solid var(--line);border-radius:8px;padding:8px 10px"></div>`;}).join('');
+    document.getElementById('tgRows').innerHTML='<div class="muted" style="font-size:12.5px;margin-bottom:6px">Confirm the exact current text for each term (edit or clear any). We will replace these with tokens.</div>'+rows;
+    const c=document.getElementById('tgCreate');c.style.opacity='1';c.style.pointerEvents='auto';
+  }catch(e){show(''+e);sb.textContent='Scan for terms';}}
+async function createTagged(){const err=document.getElementById('tgErr');const show=(m)=>{err.textContent=m;err.style.display='block';};const name=document.getElementById('tgName').value.trim();if(!name){show('Please enter a name.');return;}if(!_tgFile){show('Please choose a file.');return;}
+  const map={};document.querySelectorAll('#tgRows [data-tk]').forEach(i=>{const v=i.value.trim();if(v)map[i.dataset.tk]=v;});
+  if(!Object.keys(map).length){show('Add at least one term to tag (or use Add a property template instead).');return;}
+  const fd=new FormData();fd.append('name',name);fd.append('kind',document.getElementById('tgKind').value);fd.append('file',_tgFile);fd.append('mapping',JSON.stringify(map));fd.append('csrf',CSRF);
+  err.style.display='none';const c=document.getElementById('tgCreate');c.textContent='Tagging…';c.style.opacity='.7';
+  try{const r=await fetch('/api/templates/tag',{method:'POST',body:fd});if(!r.ok){show(await r.text());c.textContent='Create tagged template';c.style.opacity='1';return;}const t=await r.json();closeTagModal();await loadData();go('templates');toast('Tagged template created — '+(t.tagged||0)+' tokens inserted ✓');}catch(e){show(''+e);c.textContent='Create tagged template';c.style.opacity='1';}}
 async function delDeal(id){if(!confirm('Delete this redline record? This cannot be undone.'))return;const fd=new FormData();fd.append('id',id);fd.append('csrf',CSRF);await fetch('/api/deals/delete',{method:'POST',body:fd});await loadData();toast('Redline deleted');}
 function vSettings(){return `
   <div class="plan-box"><div><div class="pname">Free trial</div><div class="ppr">Upgrade anytime · no card on file</div></div><button class="btn" onclick="go('plans')">Manage plan</button></div>
@@ -847,6 +889,61 @@ def api_template_file(request: Request, tid: int):
     fn = (re.sub(r"[^A-Za-z0-9]+", "_", name).strip("_") or "template") + ".docx"
     return StreamingResponse(io.BytesIO(data), media_type=DOCX_MIME,
         headers={"Content-Disposition": f'attachment; filename="{fn}"'})
+
+
+@app.post("/api/autotag")
+async def api_autotag(request: Request, csrf: str = Form(...), file: UploadFile = File(...)):
+    u = _require(request)
+    if not check_csrf(request, csrf):
+        raise HTTPException(400, "Session expired — reload the page.")
+    if not file.filename.lower().endswith(".docx"):
+        raise HTTPException(400, "Please upload a .docx lease.")
+    raw = await file.read()
+    if len(raw) > MAX_BYTES:
+        raise HTTPException(413, "File too large (15 MB max).")
+    with tempfile.TemporaryDirectory() as d:
+        p = os.path.join(d, "lease.docx")
+        with open(p, "wb") as fh:
+            fh.write(raw)
+        try:
+            suggestions = tagger.autodetect(p)
+            existing = extract_tokens(p)
+        except Exception as exc:  # noqa: BLE001
+            raise HTTPException(422, f"Could not read that .docx: {exc}")
+    return JSONResponse({"suggestions": suggestions,
+                         "standard": [{"key": k, "label": lbl} for k, lbl in tagger.STANDARD_TOKENS],
+                         "existingTokens": existing})
+
+
+@app.post("/api/templates/tag")
+async def api_template_tag(request: Request, name: str = Form(...), kind: str = Form("Office"),
+                           mapping: str = Form(...), csrf: str = Form(...),
+                           file: UploadFile = File(...)):
+    u = _require(request)
+    if not check_csrf(request, csrf):
+        raise HTTPException(400, "Session expired — reload the page.")
+    if not file.filename.lower().endswith(".docx"):
+        raise HTTPException(400, "Please upload a .docx lease.")
+    try:
+        mp = json.loads(mapping)
+    except json.JSONDecodeError:
+        raise HTTPException(400, "Bad tag mapping.")
+    raw = await file.read()
+    if len(raw) > MAX_BYTES:
+        raise HTTPException(413, "File too large (15 MB max).")
+    with tempfile.TemporaryDirectory() as d:
+        ip, op = os.path.join(d, "in.docx"), os.path.join(d, "out.docx")
+        with open(ip, "wb") as fh:
+            fh.write(raw)
+        try:
+            n = tagger.apply_tags(ip, mp, op)
+            toks = extract_tokens(op)
+            data = open(op, "rb").read()
+        except Exception as exc:  # noqa: BLE001
+            raise HTTPException(422, f"Could not tag that lease: {exc}")
+    t = auth.create_template(u.id, name, kind, file.filename, data, toks)
+    t["tagged"] = n
+    return JSONResponse(t)
 
 
 @app.get("/api/deals")
