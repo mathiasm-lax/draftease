@@ -4,7 +4,7 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY redline_engine.py auth.py make_sample_lease.py tagger.py app.py ./
+COPY redline_engine.py auth.py make_sample_lease.py tagger.py ai_extract.py app.py ./
 
 EXPOSE 8000
 # Hosts like Render/Railway inject $PORT; default to 8000 locally.

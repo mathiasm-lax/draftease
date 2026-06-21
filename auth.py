@@ -269,7 +269,7 @@ def get_loi_blob(user_id: int, lid: int):
         l = s.get(Loi, lid)
         if not l or l.user_id != user_id:
             return None
-        return l.name, l.data
+        return l.name, l.filename, l.data
 
 
 def delete_loi(user_id: int, lid: int) -> None:

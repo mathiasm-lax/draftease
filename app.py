@@ -15,6 +15,7 @@ from fastapi.responses import (HTMLResponse, JSONResponse, RedirectResponse,
                                StreamingResponse)
 from starlette.middleware.sessions import SessionMiddleware
 
+import ai_extract
 import auth
 import tagger
 from redline_engine import extract_tokens, generate_redline, generate_redline_direct
@@ -712,7 +713,7 @@ START_PAGE = """
 </div></div>
 <div id="toast" class="toast"></div>
 <script>
-const CSRF0="__CSRF__"; let CSRF="__CSRF__"; const LOGGED_IN=__LOGGED_IN__;
+const CSRF0="__CSRF__"; let CSRF="__CSRF__"; const LOGGED_IN=__LOGGED_IN__; const AI_ON=__AI__;
 let STATE={templates:[],lois:[]};
 let step=1, baseMode='', baseTid=null, leaseFile=null, terms=[], loiMode='', loiId=null, loiFile=null, plan='single';
 const LB=["Base lease","LOI & terms","Create redline"];
@@ -753,20 +754,31 @@ function s2(){
   }else{
     tbl=`<div class="terms-table" style="margin-top:16px"><div class="tr" style="grid-template-columns:1fr 1fr 1fr"><div class="lbl">Term</div><div class="lbl">Current (in lease)</div><div class="lbl">New (from LOI)</div></div>${terms.map((t,i)=>`<div class="tr" style="grid-template-columns:1fr 1fr 1fr"><div class="lbl">${esc(t.label)}</div><input value="${esc(t.current)}" oninput="terms[${i}].current=this.value"><input value="${esc(t.nw)}" placeholder="blank = no change" oninput="terms[${i}].nw=this.value"></div>`).join('')}</div>`;
   }
-  return `<div class="wbox"><h2>Step 2 &mdash; Pick the LOI &amp; new terms</h2><p class="wsub">Choose a saved LOI or upload a new one, then enter the new terms it specifies. (Automatic reading of the LOI is coming with the AI layer; for now, confirm the terms.)</p>
+  const loiHint=AI_ON?'Choose or upload the signed LOI and we\\'ll read it and pre-fill the new terms below — please verify each one.':'Choose or upload the signed LOI, then type the new terms it specifies into the table below.';
+  return `<div class="wbox"><h2>Step 2 &mdash; Pick the LOI &amp; new terms</h2><p class="wsub">${loiHint}</p>
     <select class="gin" onchange="onLoiSel(this.value)">${opts}</select>${loiExtra}${tbl}
     <div class="wfoot"><button class="btn btn-ghost" onclick="step=1;render()">← Back</button><button class="btn btn-primary" onclick="step=3;render()">Continue →</button></div></div>`;}
-function onLoiSel(v){if(v==='upload'){loiMode='upload';loiId=null;}else if(v&&v.indexOf('l:')===0){loiMode='loi';loiId=parseInt(v.slice(2));loiFile=null;}else{loiMode='';loiId=null;loiFile=null;}render();}
-function onLoi(){loiFile=document.getElementById('loiInput').files[0]||null;render();}
+function onLoiSel(v){if(v==='upload'){loiMode='upload';loiId=null;}else if(v&&v.indexOf('l:')===0){loiMode='loi';loiId=parseInt(v.slice(2));loiFile=null;render();if(AI_ON)extractLoi();return;}else{loiMode='';loiId=null;loiFile=null;}render();}
+function onLoi(){loiFile=document.getElementById('loiInput').files[0]||null;render();if(AI_ON&&loiFile)extractLoi();}
+function applyExtracted(d){if(!d)return;let hit=0;terms.forEach(t=>{const k=t.token||t.key;const v=(d[k]||'').trim();if(!v)return;hit++;if(baseMode==='template'){t.value=v;}else{t.nw=v;}});return hit;}
+async function extractLoi(){const fd=new FormData();if(loiMode==='upload'&&loiFile){fd.append('file',loiFile);}else if(loiMode==='loi'&&loiId){fd.append('loi_id',loiId);}else{return;}fd.append('csrf',CSRF);
+  toast('Reading the LOI…');
+  try{const r=await fetch('/api/extract-loi',{method:'POST',body:fd});if(!r.ok){toast(r.status===503?'AI reading not enabled — enter terms manually.':'Could not read LOI — enter terms manually.');return;}
+    const j=await r.json();const hit=applyExtracted(j.terms||{});render();toast(hit?('Pre-filled '+hit+' term'+(hit===1?'':'s')+' from the LOI — please verify.'):'No matching terms found — enter them manually.');
+  }catch(e){toast('Could not read LOI — enter terms manually.');}}
 function changeCount(){if(baseMode==='template'){return terms.filter(t=>t.value&&t.value.trim()).length;}return terms.filter(t=>t.nw&&t.nw.trim()&&t.current&&t.current.trim()&&t.nw.trim()!==t.current.trim()).length;}
 function dlname(){if(baseMode==='template'){const t=STATE.templates.find(x=>x.id===baseTid);return (((t&&t.name)||'lease').replace(/[^a-z0-9]+/gi,'_'))+'_redline.docx';}return leaseFile.name.replace(/\\.docx$/i,'')+'_redline.docx';}
 function doGenerate(){if(baseMode==='template'){const tt={};terms.forEach(x=>{if(x.value&&x.value.trim())tt[x.token]=x.value.trim();});const fd=new FormData();fd.append('template_id',baseTid);fd.append('terms',JSON.stringify(tt));fd.append('csrf',CSRF);return fetch('/api/redline-from-template',{method:'POST',body:fd});}
   const ch=terms.filter(x=>x.nw&&x.nw.trim()&&x.current&&x.current.trim()&&x.nw.trim()!==x.current.trim()).map(x=>[x.current.trim(),x.nw.trim()]);const fd=new FormData();fd.append('lease',leaseFile);fd.append('changes',JSON.stringify(ch));fd.append('csrf',CSRF);return fetch('/api/guest-redline',{method:'POST',body:fd});}
+function noTermsNote(){const need=baseMode==='template'?'enter a New value for at least one term':'fill in both the Current and New value for at least one term';
+  return `<div class="modal-err" style="display:block;background:#fff7ed;border-color:#fed7aa;color:#9a3412">No term changes yet. Go back to Step 2 and ${need}. The redline only changes terms you give a new value for.</div>`;}
 function s3(){const n=changeCount();
   if(LOGGED_IN){return `<div class="wbox"><h2>Step 3 &mdash; Create redline</h2><p class="wsub">${n} term${n===1?'':'s'} will be applied. We'll produce a Word tracked-changes redline.</p>
-    <div class="wfoot"><button class="btn btn-ghost" onclick="step=2;render()">← Back</button><button class="btn btn-primary" ${n?'':'disabled'} onclick="gen(event)">Generate redline →</button></div></div>`;}
+    ${n?'':noTermsNote()}
+    <div class="wfoot"><button class="btn btn-ghost" onclick="step=2;render()">← Back to terms</button>${n?'<button class="btn btn-primary" onclick="gen(event)">Generate redline →</button>':''}</div></div>`;}
   const plans=[['payg','Single use','$50','per redline'],['unlimited','Monthly','$199','unlimited']];
   return `<div class="wbox"><h2>Step 3 &mdash; Create your account</h2><p class="wsub">Register (or sign in) and choose a plan to generate your redline (${n} change${n===1?'':'s'}). New accounts include free trial credits.</p>
+    ${n?'':noTermsNote()}
     <div class="planpick" style="grid-template-columns:repeat(2,1fr)">${plans.map(p=>`<div class="planopt ${plan===p[0]?'sel':''}" onclick="plan='${p[0]}';render()">${p[1]}<div class="pa">${p[2]}<span> ${p[3]}</span></div></div>`).join('')}</div>
     <label class="field-label">Name</label><input id="gName" class="gin" type="text" autocomplete="name">
     <label class="field-label">Work email</label><input id="gEmail" class="gin" type="email" autocomplete="email">
@@ -871,6 +883,7 @@ def start(request: Request):
     body = (START_PAGE
             .replace("__CSRF__", csrf_token(request))
             .replace("__LOGGED_IN__", "true" if u else "false")
+            .replace("__AI__", "true" if ai_extract.ENABLED else "false")
             .replace("__NAME__", (u.name or u.email) if u else ""))
     return HTMLResponse(page(body, "Create a redline · Draftease"))
 
@@ -1145,6 +1158,35 @@ def api_loi_delete(request: Request, id: int = Form(...), csrf: str = Form(...))
         raise HTTPException(400, "Session expired.")
     auth.delete_loi(u.id, id)
     return JSONResponse({"ok": True})
+
+
+@app.post("/api/extract-loi")
+async def api_extract_loi(request: Request, file: UploadFile = File(None),
+                          loi_id: str = Form(""), csrf: str = Form("")):
+    """Read an LOI with Claude on Bedrock and return the standard terms it states."""
+    if not ai_extract.ENABLED:
+        raise HTTPException(503, "AI LOI reading isn't set up yet.")
+    fb = fn = None
+    if file is not None and file.filename:
+        fn = file.filename
+        fb = await file.read()
+    elif loi_id:
+        u = current_user(request)
+        if not u:
+            raise HTTPException(401, "Sign in to use a saved LOI.")
+        blob = auth.get_loi_blob(u.id, int(loi_id))
+        if not blob:
+            raise HTTPException(404, "LOI not found.")
+        _name, fn, fb = blob
+    if not fb:
+        raise HTTPException(400, "No LOI provided.")
+    if len(fb) > MAX_BYTES:
+        raise HTTPException(413, "File too large (15 MB max).")
+    try:
+        terms = ai_extract.extract_terms(fb, fn)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(502, f"AI extraction failed: {exc}")
+    return JSONResponse({"terms": terms})
 
 
 @app.get("/api/deals")
