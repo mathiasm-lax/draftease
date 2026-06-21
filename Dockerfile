@@ -5,8 +5,8 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Cache-bust: bump APP_REV whenever the .py files change so the COPY layer below
-# is never served from a stale Docker cache. (rev 5 — bold 3-step flow + home)
-ARG APP_REV=5
+# is never served from a stale Docker cache. (rev 6 — live term re-enable)
+ARG APP_REV=6
 RUN echo "Draftease build rev ${APP_REV}"
 COPY redline_engine.py auth.py make_sample_lease.py tagger.py ai_extract.py app.py ./
 

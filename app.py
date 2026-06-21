@@ -812,6 +812,7 @@ START_PAGE = """
 let CSRF="__CSRF__"; const LOGGED_IN=__LOGGED_IN__; const AI_ON=__AI__;
 let STATE={templates:[],lois:[]};
 let baseMode='', baseTid=null, leaseFile=null, terms=[], loiMode='', loiId=null, loiFile=null, plan='payg', openMenu='';
+let reg={name:'',email:'',pass:''};
 function esc(s){return (s==null?'':String(s)).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}
 function prettify(t){return String(t).replace(/_/g,' ').replace(/\\b\\w/g,c=>c.toUpperCase());}
 function toast(m){const t=document.getElementById('toast');t.textContent=m;t.classList.add('show');clearTimeout(window._tt);window._tt=setTimeout(()=>t.classList.remove('show'),2800);}
@@ -857,9 +858,9 @@ function termsPanel(){
   if(!baseMode||!terms.length) return '';
   let rows;
   if(baseMode==='template'){
-    rows=terms.map((t,i)=>`<div class="trow" style="grid-template-columns:1fr 1.5fr"><div class="tl">${esc(t.label)}</div><input value="${esc(t.value)}" placeholder="blank = unchanged" oninput="terms[${i}].value=this.value"></div>`).join('');
+    rows=terms.map((t,i)=>`<div class="trow" style="grid-template-columns:1fr 1.5fr"><div class="tl">${esc(t.label)}</div><input data-ti="${i}" data-f="value" value="${esc(t.value)}" placeholder="blank = unchanged" oninput="terms[${i}].value=this.value;render()"></div>`).join('');
   }else{
-    rows=`<div class="trow" style="grid-template-columns:1fr 1fr 1fr"><div class="tl" style="font-size:12px;text-transform:uppercase;color:var(--muted)">Term</div><div class="tl" style="font-size:12px;text-transform:uppercase;color:var(--muted)">Current</div><div class="tl" style="font-size:12px;text-transform:uppercase;color:var(--muted)">New</div></div>`+terms.map((t,i)=>`<div class="trow" style="grid-template-columns:1fr 1fr 1fr"><div class="tl">${esc(t.label)}</div><input value="${esc(t.current)}" oninput="terms[${i}].current=this.value"><input value="${esc(t.nw)}" placeholder="blank = no change" oninput="terms[${i}].nw=this.value"></div>`).join('');
+    rows=`<div class="trow" style="grid-template-columns:1fr 1fr 1fr"><div class="tl" style="font-size:12px;text-transform:uppercase;color:var(--muted)">Term</div><div class="tl" style="font-size:12px;text-transform:uppercase;color:var(--muted)">Current</div><div class="tl" style="font-size:12px;text-transform:uppercase;color:var(--muted)">New</div></div>`+terms.map((t,i)=>`<div class="trow" style="grid-template-columns:1fr 1fr 1fr"><div class="tl">${esc(t.label)}</div><input data-ti="${i}" data-f="current" value="${esc(t.current)}" oninput="terms[${i}].current=this.value;render()"><input data-ti="${i}" data-f="nw" value="${esc(t.nw)}" placeholder="blank = no change" oninput="terms[${i}].nw=this.value;render()"></div>`).join('');
   }
   return `<div class="termwrap"><div class="termhd">Terms to apply${AI_ON?' · auto-filled from the LOI where found':''}</div>${rows}</div>`;}
 
@@ -873,6 +874,9 @@ function doGenerate(){if(baseMode==='template'){const tt={};terms.forEach(x=>{if
 function card(n,cls,title,sub,chip,body){return `<div class="stepcard ${cls}"><div class="shead"><div class="stepnum">${cls.indexOf('done')>=0?'✓':n}</div><div><div class="stitle">${title}</div><div class="ssub">${sub}</div></div>${chip?`<div class="schip">${chip}</div>`:''}</div>${body}</div>`;}
 function render(){
   const s=document.getElementById('steps');
+  // preserve focus + caret across re-render (term inputs use data-ti/data-f)
+  let restore=null;const a=document.activeElement;
+  if(a&&a.dataset&&a.dataset.ti!==undefined){restore={ti:a.dataset.ti,f:a.dataset.f,pos:a.selectionStart};}
   // Step 1
   const b1=`<div class="ddwrap"><button class="ddbtn ${baseMode?'set':''}" onclick="setMenu('tpl')"><span class="dlab ${baseMode?'':'dph'}">${baseMode?baseLabel():'Choose a template…'}</span><span class="dchev">▾</span></button>${openMenu==='tpl'?tplMenu():''}</div>`;
   const c1=card(1, baseDone()?'done':'active', 'Base template', 'The form lease to redline from', baseDone()?'Ready':'', b1);
@@ -883,6 +887,7 @@ function render(){
   // Step 3
   const c3=card(3, 'active', 'Create redline', 'Generate the tracked-changes draft', '', step3Body());
   s.innerHTML=c1+c2+c3;
+  if(restore){const el=document.querySelector(`[data-ti="${restore.ti}"][data-f="${restore.f}"]`);if(el){el.focus();try{el.setSelectionRange(restore.pos,restore.pos);}catch(e){}}}
 }
 function noTermsNote(){return `<div class="flownote">No terms entered yet — choose your LOI (or "enter terms manually") above and give at least one term a new value.</div>`;}
 function step3Body(){
@@ -893,9 +898,9 @@ function step3Body(){
   const plans=[['payg','Single use','$50','per redline'],['unlimited','Monthly','$199','unlimited']];
   return `${n?'':noTermsNote()}
     <div class="planrow">${plans.map(p=>`<div class="planopt2 ${plan===p[0]?'sel':''}" onclick="plan='${p[0]}';render()">${p[1]}<div class="pp">${p[2]} <span>${p[3]}</span></div></div>`).join('')}</div>
-    <input id="gName" class="fld" type="text" placeholder="Your name" autocomplete="name">
-    <input id="gEmail" class="fld" type="email" placeholder="Work email" autocomplete="email">
-    <input id="gPass" class="fld" type="password" placeholder="Password (8+ characters)" autocomplete="new-password">
+    <input id="gName" class="fld" type="text" placeholder="Your name" autocomplete="name" value="${esc(reg.name)}" oninput="reg.name=this.value">
+    <input id="gEmail" class="fld" type="email" placeholder="Work email" autocomplete="email" value="${esc(reg.email)}" oninput="reg.email=this.value">
+    <input id="gPass" class="fld" type="password" placeholder="Password (8+ characters)" autocomplete="new-password" value="${esc(reg.pass)}" oninput="reg.pass=this.value">
     <div id="s3err" class="modal-err" style="display:none;margin-bottom:10px"></div>
     <button class="bigcreate" ${n?'':'disabled'} onclick="registerAndGen(event)">Create account &amp; redline →</button>
     <div class="hint" style="text-align:center;margin-top:10px">Already have an account? <a href="/login" style="color:var(--brand);font-weight:700">Sign in</a></div>`;
