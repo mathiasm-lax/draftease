@@ -10,12 +10,24 @@ Public API:
     autodetect(path)             -> {token_key: detected_phrase}
     apply_tags(in_path, mapping, out_path) -> count of tokens inserted
 """
+import copy
 import re
 
 from docx import Document
+from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
 
 from redline_engine import _iter_paragraphs, _run, _sanitize
+
+
+def _run_with_child(child, rpr):
+    """A <w:r> carrying a clone of a non-text inline element (tab/br/drawing/…),
+    preserving its run properties so layout is not lost during a rebuild."""
+    r = OxmlElement("w:r")
+    if rpr is not None:
+        r.append(copy.deepcopy(rpr))
+    r.append(copy.deepcopy(child))
+    return r
 
 # Standard lease-term token library
 STANDARD_TOKENS = [
@@ -77,7 +89,14 @@ def autodetect(path: str) -> dict:
 
 
 def apply_tags(in_path: str, mapping: dict, out_path: str) -> int:
-    """Replace each confirmed phrase with its {{token}} in the .docx."""
+    """Replace each confirmed phrase with its {{token}} in the .docx.
+
+    Non-text inline elements (tabs, breaks, drawings) are preserved: the
+    paragraph is rebuilt atom-by-atom so a tab between a Data-Sheet label and its
+    value no longer blocks tagging. A phrase is only tagged where its characters
+    form a contiguous run of text atoms (i.e. no tab/break splits the phrase
+    itself), so we never replace across a preserved element.
+    """
     reps = sorted([(v.strip(), k) for k, v in mapping.items() if v and v.strip()],
                   key=lambda x: -len(x[0]))
     if not reps:
@@ -85,59 +104,93 @@ def apply_tags(in_path: str, mapping: dict, out_path: str) -> int:
         _sanitize(out_path)
         return 0
 
+    W_T, W_R, W_RPR = qn("w:t"), qn("w:r"), qn("w:rPr")
     doc = Document(in_path)
     count = 0
-    skip = {qn("w:tab"), qn("w:br"), qn("w:drawing"), qn("w:cr"), qn("w:pict")}
     for p in _iter_paragraphs(doc):
-        runs = p._p.findall(qn("w:r"))
+        runs = p._p.findall(W_R)
         if not runs:
             continue
-        chars, crpr = [], []
+        # Build an ordered atom list: ('t', char, rpr) for text, ('e', element, rpr)
+        # for tabs/breaks/drawings/etc. `pos2atom` maps each text-char index -> atom index.
+        atoms = []
+        pos2atom = []
+        chars = []
         for r in runs:
-            rpr = r.find(qn("w:rPr"))
-            for t in r.findall(qn("w:t")):
-                for ch in (t.text or ""):
-                    chars.append(ch); crpr.append(rpr)
+            rpr = r.find(W_RPR)
+            for child in r:
+                if child.tag == W_RPR:
+                    continue
+                if child.tag == W_T:
+                    for ch in (child.text or ""):
+                        pos2atom.append(len(atoms))
+                        chars.append(ch)
+                        atoms.append(("t", ch, rpr))
+                else:
+                    atoms.append(("e", child, rpr))
         full = "".join(chars)
+        if not full:
+            continue
+
         used = [False] * len(full)
-        marks = []
+        marks = []  # (text_start, text_end, token)
         for phrase, token in reps:
             start = 0
             while True:
                 j = full.find(phrase, start)
                 if j < 0:
                     break
-                if not any(used[j:j + len(phrase)]):
-                    marks.append((j, j + len(phrase), token))
-                    for x in range(j, j + len(phrase)):
-                        used[x] = True
-                start = j + len(phrase)
+                k = j + len(phrase)
+                if not any(used[j:k]):
+                    a0, a1 = pos2atom[j], pos2atom[k - 1]
+                    # contiguous text atoms only (no preserved element splits the phrase)
+                    if a1 - a0 == k - 1 - j and all(atoms[a][0] == "t" for a in range(a0, a1 + 1)):
+                        marks.append((j, k, token))
+                        for x in range(j, k):
+                            used[x] = True
+                start = k
         if not marks:
             continue
-        if any(child.tag in skip for r in runs for child in r):
-            continue
         marks.sort()
-        new = []
+        start_token = {s: tok for (s, e, tok) in marks}
+        end_of = {s: e for (s, e, tok) in marks}
 
-        def emit(a, b):
-            i = a
-            while i < b:
-                j = i
-                cur = crpr[i]
-                while j < b and crpr[j] is cur:
-                    j += 1
-                new.append(_run(full[i:j], cur))
-                i = j
+        new_nodes = []
+        buf, buf_rpr = [], None
 
-        pos = 0
-        for s, e, token in marks:
-            emit(pos, s)
-            new.append(_run("{{" + token + "}}", crpr[s] if s < len(crpr) else None))
-            count += 1
-            pos = e
-        emit(pos, len(full))
+        def flush():
+            nonlocal buf, buf_rpr
+            if buf:
+                new_nodes.append(_run("".join(buf), buf_rpr))
+                buf = []
+
+        tpos = 0
+        skip_until = -1
+        for kind, payload, rpr in atoms:
+            if kind == "t":
+                if tpos < skip_until:
+                    tpos += 1
+                    continue
+                if tpos in start_token:
+                    flush()
+                    new_nodes.append(_run("{{" + start_token[tpos] + "}}", rpr))
+                    count += 1
+                    skip_until = end_of[tpos]
+                    tpos += 1
+                    continue
+                if buf and rpr is not buf_rpr:
+                    flush()
+                if not buf:
+                    buf_rpr = rpr
+                buf.append(payload)
+                tpos += 1
+            else:
+                flush()
+                new_nodes.append(_run_with_child(payload, rpr))
+        flush()
+
         at = list(p._p).index(runs[0])
-        for n in new:
+        for n in new_nodes:
             p._p.insert(at, n); at += 1
         for r in runs:
             p._p.remove(r)
