@@ -4,6 +4,10 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
+# Cache-bust: bump APP_REV whenever the .py files change so the COPY layer below
+# is never served from a stale Docker cache. (rev 3 — tab-aware tagger)
+ARG APP_REV=3
+RUN echo "Draftease build rev ${APP_REV}"
 COPY redline_engine.py auth.py make_sample_lease.py tagger.py ai_extract.py app.py ./
 
 EXPOSE 8000
