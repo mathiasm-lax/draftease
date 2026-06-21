@@ -49,13 +49,17 @@ def _secret_key() -> str:
     key = os.environ.get("DRAFTEASE_SECRET_KEY")
     if key:
         return key
-    path = ".draftease_secret"
-    if os.path.exists(path):
-        return open(path).read().strip()
-    key = secrets.token_urlsafe(48)
-    with open(path, "w") as fh:
-        fh.write(key)
-    return key
+    # Prefer a DB-persisted secret so redeploys don't log everyone out.
+    try:
+        return auth.get_or_create_app_secret()
+    except Exception:  # noqa: BLE001 — fall back to a local file (dev) if DB isn't ready
+        path = ".draftease_secret"
+        if os.path.exists(path):
+            return open(path).read().strip()
+        key = secrets.token_urlsafe(48)
+        with open(path, "w") as fh:
+            fh.write(key)
+        return key
 
 
 app = FastAPI(title="Draftease")
@@ -472,8 +476,9 @@ APP_SHELL = """
 </div>
 <div id="tagmodal" class="modal-overlay">
   <div class="modal" style="max-width:580px">
-    <h3>Tag a clean lease</h3>
-    <div class="muted" style="font-size:13px;margin-bottom:2px">For a lease with no {{tokens}}. We detect standard terms; you confirm the exact text, and we insert the tokens for you.</div>
+    <h3 id="tgTitle">Tag a clean lease</h3>
+    <div class="muted" id="tgIntro" style="font-size:13px;margin-bottom:2px">For a lease with no {{tokens}}. We detect standard terms; you confirm the exact text, and we insert the tokens for you.</div>
+    <div id="tgNewOnly">
     <label class="field-label">Template name</label>
     <input id="tgName" type="text" placeholder="e.g. 606 - 1155 Lease" autocomplete="off">
     <label class="field-label">Type</label>
@@ -485,6 +490,7 @@ APP_SHELL = """
       <button type="button" class="btn btn-primary btn-sm" id="tgScanBtn" onclick="scanLease()">Scan for terms</button>
     </div>
     <input id="tgFile" type="file" accept=".docx" style="display:none" onchange="onTagFile()">
+    </div>
     <div id="tgRows" style="margin-top:14px;max-height:46vh;overflow-y:auto"></div>
     <div id="tgErr" class="modal-err" style="display:none"></div>
     <div class="modal-actions">
@@ -524,7 +530,7 @@ function vDashboard(){const d=STATE.deals;return `
 function vRedlines(){return `<div class="panel"><div class="panel-head"><h3>All redlines</h3><button class="btn btn-primary btn-sm" onclick="go('wizard')">+ New redline</button></div>
   <div class="panel-body"><table><thead><tr><th>Deal</th><th>Property</th><th>Created</th><th>Status</th></tr></thead><tbody>${dealRows(filteredDeals())}</tbody></table></div></div>`;}
 function vTemplates(){const cards=filteredTemplates().map(t=>`<div class="tcard" style="cursor:pointer" title="Click to open / download this template" onclick="openTemplate(${t.id})"><div class="top"><div class="ficon">${esc((t.kind||'O').slice(0,1))}</div><div><h4>${esc(t.name)}</h4><div class="addr">${esc(t.kind)} · ${t.tokens.length} fields</div></div><button class="xbtn" style="margin-left:auto" title="Delete" onclick="event.stopPropagation();delTemplate(${t.id})">✕</button></div>
-    <div class="meta"><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:160px">${esc(t.filename)}</span><span class="tag done" style="cursor:pointer"><span class="d"></span>Open</span></div></div>`).join('');
+    <div class="meta"><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:130px">${esc(t.filename)}</span><button class="btn btn-outline btn-sm" title="Auto-detect &amp; tag standard fields" onclick="event.stopPropagation();tagExisting(${t.id})">🏷️ ${t.tokens.length?'Re-tag':'Tag fields'}</button></div>${t.tokens.length?'':'<div class="muted" style="font-size:12px;margin-top:6px;color:var(--brand)">No fields yet — click Tag fields to make it redline-ready.</div>'}</div>`).join('');
   const empty=(!STATE.templates.length&&STATE.loaded)?`<div class="muted" style="grid-column:1/-1;font-size:14px;margin-bottom:2px">No templates yet — upload your first property form lease.</div>`:'';
   return `<div id="tplMsg"></div><div class="tgrid">${empty}${cards}
     <div class="tcard add" onclick="showUpload()"><div class="plus">+</div><b>Add a property template</b><span>Upload a form lease that already has {{tokens}}</span></div>
@@ -538,13 +544,28 @@ async function uploadTemplate(){const name=document.getElementById('upName').val
   const fd=new FormData();fd.append('name',name);fd.append('kind',kind);fd.append('file',f);fd.append('csrf',CSRF);
   err.style.display='none';btn.textContent='Uploading…';btn.style.opacity='.7';
   try{const r=await fetch('/api/templates',{method:'POST',body:fd});if(!r.ok){showErr(await r.text());btn.textContent='Upload template';btn.style.opacity='1';return;}
-    closeUploadModal();btn.style.opacity='1';await loadData();go('templates');toast('Template uploaded ✓');
+    const t=await r.json();closeUploadModal();btn.style.opacity='1';btn.textContent='Upload template';await loadData();go('templates');
+    if(t&&(t.tokens||[]).length===0){toast('No {{tokens}} found — let\\'s tag the standard fields.');tagExisting(t.id);}
+    else toast('Template uploaded — '+((t.tokens||[]).length)+' fields ✓');
   }catch(e){showErr(''+e);btn.textContent='Upload template';btn.style.opacity='1';}}
 async function delTemplate(id){if(!confirm('Delete this template? This cannot be undone.'))return;const fd=new FormData();fd.append('id',id);fd.append('csrf',CSRF);await fetch('/api/templates/delete',{method:'POST',body:fd});await loadData();toast('Template deleted');}
 async function openTemplate(id){try{const r=await fetch('/api/templates/'+id+'/file');if(!r.ok){toast('Could not open that file.');return;}const b=await r.blob();const t=STATE.templates.find(x=>x.id===id);const url=URL.createObjectURL(b);const a=document.createElement('a');a.href=url;a.download=(((t&&t.name)||'template').replace(/[^a-z0-9]+/gi,'_'))+'.docx';document.body.appendChild(a);a.click();a.remove();URL.revokeObjectURL(url);toast('Template downloaded');}catch(e){toast('Could not open that file.');}}
-let _tgFile=null;
-function showTagModal(){_tgFile=null;document.getElementById('tgName').value='';document.getElementById('tgKind').value='Office';document.getElementById('tgFile').value='';const lbl=document.getElementById('tgFileName');lbl.textContent='No file chosen';lbl.style.color='';document.getElementById('tgScanBtn').textContent='Scan for terms';document.getElementById('tgRows').innerHTML='<div class="muted" style="font-size:13px">Choose your lease, then click <b>Scan for terms</b>.</div>';const e=document.getElementById('tgErr');e.style.display='none';const c=document.getElementById('tgCreate');c.textContent='Create tagged template';c.style.opacity='.5';c.style.pointerEvents='none';document.getElementById('tagmodal').classList.add('show');setTimeout(()=>document.getElementById('tgName').focus(),50);}
-function closeTagModal(){document.getElementById('tagmodal').classList.remove('show');}
+let _tgFile=null, _retagId=null;
+function showTagModal(){_tgFile=null;_retagId=null;document.getElementById('tgTitle').textContent='Tag a clean lease';document.getElementById('tgIntro').textContent='For a lease with no {{tokens}}. We detect standard terms; you confirm the exact text, and we insert the tokens for you.';document.getElementById('tgNewOnly').style.display='';document.getElementById('tgName').value='';document.getElementById('tgKind').value='Office';document.getElementById('tgFile').value='';const lbl=document.getElementById('tgFileName');lbl.textContent='No file chosen';lbl.style.color='';document.getElementById('tgScanBtn').textContent='Scan for terms';document.getElementById('tgRows').innerHTML='<div class="muted" style="font-size:13px">Choose your lease, then click <b>Scan for terms</b>.</div>';const e=document.getElementById('tgErr');e.style.display='none';const c=document.getElementById('tgCreate');c.textContent='Create tagged template';c.style.opacity='.5';c.style.pointerEvents='none';document.getElementById('tagmodal').classList.add('show');setTimeout(()=>document.getElementById('tgName').focus(),50);}
+function closeTagModal(){document.getElementById('tagmodal').classList.remove('show');_retagId=null;document.getElementById('tgNewOnly').style.display='';}
+function tagRowsHtml(j){return (j.standard||[]).map(s=>{const v=((j.suggestions||{})[s.key]||'').replace(/"/g,'&quot;');return `<div style="display:grid;grid-template-columns:140px 1fr;gap:10px;align-items:center;padding:5px 0;border-top:1px solid var(--line-2)"><div style="font-size:13px;color:var(--muted)">${s.label}</div><input data-tk="${s.key}" value="${v}" placeholder="(not found — paste exact text or leave blank)" style="width:100%;font-size:13px;border:1px solid var(--line);border-radius:8px;padding:8px 10px"></div>`;}).join('');}
+async function tagExisting(id){const t=STATE.templates.find(x=>x.id===id);_retagId=id;_tgFile=null;
+  document.getElementById('tgTitle').textContent='Tag fields — '+esc((t&&t.name)||'template');
+  document.getElementById('tgIntro').textContent='We auto-detect standard terms in this lease. Confirm the exact current text for each, then we insert the tokens in place. Detection is best-effort — please verify.';
+  document.getElementById('tgNewOnly').style.display='none';
+  const rows=document.getElementById('tgRows');rows.innerHTML='<div class="muted" style="font-size:13px">Scanning the lease…</div>';
+  const e=document.getElementById('tgErr');e.style.display='none';
+  const c=document.getElementById('tgCreate');c.textContent='Apply tags';c.style.opacity='.5';c.style.pointerEvents='none';
+  document.getElementById('tagmodal').classList.add('show');
+  try{const j=await fetch('/api/templates/'+id+'/autotag').then(r=>{if(!r.ok)throw new Error('scan failed');return r.json();});
+    rows.innerHTML='<div class="muted" style="font-size:12.5px;margin-bottom:6px">Confirm the exact current text for each term (edit or clear any). We replace these with {{tokens}}.</div>'+tagRowsHtml(j);
+    c.style.opacity='1';c.style.pointerEvents='auto';
+  }catch(err){rows.innerHTML='';e.textContent='Could not scan this template: '+err;e.style.display='block';}}
 function onTagFile(){const f=document.getElementById('tgFile').files[0];_tgFile=f||null;const lbl=document.getElementById('tgFileName');if(f){lbl.textContent=f.name;lbl.style.color='var(--ink)';const n=document.getElementById('tgName');if(!n.value.trim())n.value=f.name.replace(/\\.docx$/i,'');}else{lbl.textContent='No file chosen';lbl.style.color='';}}
 async function scanLease(){const err=document.getElementById('tgErr');const show=(m)=>{err.textContent=m;err.style.display='block';};if(!_tgFile){show('Please choose a .docx file first.');return;}
   const fd=new FormData();fd.append('file',_tgFile);fd.append('csrf',CSRF);err.style.display='none';const sb=document.getElementById('tgScanBtn');sb.textContent='Scanning…';
@@ -553,8 +574,16 @@ async function scanLease(){const err=document.getElementById('tgErr');const show
     document.getElementById('tgRows').innerHTML='<div class="muted" style="font-size:12.5px;margin-bottom:6px">Confirm the exact current text for each term (edit or clear any). We will replace these with tokens.</div>'+rows;
     const c=document.getElementById('tgCreate');c.style.opacity='1';c.style.pointerEvents='auto';
   }catch(e){show(''+e);sb.textContent='Scan for terms';}}
-async function createTagged(){const err=document.getElementById('tgErr');const show=(m)=>{err.textContent=m;err.style.display='block';};const name=document.getElementById('tgName').value.trim();if(!name){show('Please enter a name.');return;}if(!_tgFile){show('Please choose a file.');return;}
+async function createTagged(){const err=document.getElementById('tgErr');const show=(m)=>{err.textContent=m;err.style.display='block';};
   const map={};document.querySelectorAll('#tgRows [data-tk]').forEach(i=>{const v=i.value.trim();if(v)map[i.dataset.tk]=v;});
+  if(_retagId){
+    if(!Object.keys(map).length){show('Add at least one term to tag.');return;}
+    const c=document.getElementById('tgCreate');const fd=new FormData();fd.append('mapping',JSON.stringify(map));fd.append('csrf',CSRF);
+    err.style.display='none';c.textContent='Applying…';c.style.opacity='.7';
+    try{const r=await fetch('/api/templates/'+_retagId+'/retag',{method:'POST',body:fd});if(!r.ok){show(await r.text());c.textContent='Apply tags';c.style.opacity='1';return;}const t=await r.json();closeTagModal();await loadData();go('templates');toast('Tagged '+(t.tagged||0)+' field'+(t.tagged===1?'':'s')+' ✓');}catch(e){show(''+e);c.textContent='Apply tags';c.style.opacity='1';}
+    return;
+  }
+  const name=document.getElementById('tgName').value.trim();if(!name){show('Please enter a name.');return;}if(!_tgFile){show('Please choose a file.');return;}
   if(!Object.keys(map).length){show('Add at least one term to tag (or use Add a property template instead).');return;}
   const fd=new FormData();fd.append('name',name);fd.append('kind',document.getElementById('tgKind').value);fd.append('file',_tgFile);fd.append('mapping',JSON.stringify(map));fd.append('csrf',CSRF);
   err.style.display='none';const c=document.getElementById('tgCreate');c.textContent='Tagging…';c.style.opacity='.7';
@@ -1130,6 +1159,28 @@ async def api_template_tag(request: Request, name: str = Form(...), kind: str = 
     t = auth.create_template(u.id, name, kind, file.filename, data, toks)
     t["tagged"] = n
     return JSONResponse(t)
+
+
+@app.get("/api/templates/{tid}/autotag")
+def api_template_autotag_existing(request: Request, tid: int):
+    """Auto-detect standard terms in an already-saved template (for the Tag-fields button)."""
+    u = _require(request)
+    blob = auth.get_template_blob(u.id, tid)
+    if not blob:
+        raise HTTPException(404, "Template not found.")
+    _name, data, _toks = blob
+    with tempfile.TemporaryDirectory() as d:
+        p = os.path.join(d, "t.docx")
+        with open(p, "wb") as fh:
+            fh.write(data)
+        try:
+            suggestions = tagger.autodetect(p)
+            existing = extract_tokens(p)
+        except Exception as exc:  # noqa: BLE001
+            raise HTTPException(422, f"Could not read that template: {exc}")
+    return JSONResponse({"suggestions": suggestions,
+                         "standard": [{"key": k, "label": lbl} for k, lbl in tagger.STANDARD_TOKENS],
+                         "existingTokens": existing})
 
 
 @app.post("/api/templates/{tid}/retag")

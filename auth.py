@@ -104,8 +104,32 @@ class Billing(Base):
     stripe_subscription_id: Mapped[str] = mapped_column(String(80), default="")
 
 
+class AppSetting(Base):
+    __tablename__ = "app_settings"
+    key: Mapped[str] = mapped_column(String(64), primary_key=True)
+    value: Mapped[str] = mapped_column(Text, default="")
+
+
 def init_db() -> None:
     Base.metadata.create_all(_engine)
+
+
+def get_or_create_app_secret() -> str:
+    """Return a stable session-signing secret stored in the (persistent) DB, so
+    redeploys/restarts don't invalidate everyone's login. Env var still wins."""
+    import secrets as _secrets
+    Base.metadata.create_all(_engine)  # idempotent; safe if called before init_db
+    with Session(_engine) as s:
+        row = s.get(AppSetting, "session_secret")
+        if row and row.value:
+            return row.value
+        val = _secrets.token_urlsafe(48)
+        if row:
+            row.value = val
+        else:
+            s.add(AppSetting(key="session_secret", value=val))
+        s.commit()
+        return val
 
 
 # --------------------------------------------------------------------------- #
