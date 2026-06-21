@@ -107,65 +107,101 @@ def _paragraph_is_rebuildable(runs) -> bool:
     return True
 
 
+def _run_with_child(child, rpr):
+    """A <w:r> carrying a clone of a non-text inline element (tab/br/drawing/…),
+    so layout elements survive a paragraph rebuild."""
+    r = OxmlElement("w:r")
+    if rpr is not None:
+        r.append(_clone_rpr(rpr))
+    r.append(copy.deepcopy(child))
+    return r
+
+
 def _process_paragraph(p, terms: Dict[str, str], counter, author, date, report) -> None:
     runs = _direct_runs(p)
     if not runs:
         return
 
-    # Reconstruct the paragraph's visible text and, for each character, remember
-    # which run's rPr it came from (identity reference -> preserves formatting).
+    # Build an ordered atom list, preserving non-text inline children (tabs,
+    # breaks, drawings) so we can rebuild the paragraph without dropping them.
+    W_T, W_RPR = qn("w:t"), qn("w:rPr")
+    atoms = []        # ('t', char, rpr) | ('e', element, rpr)
+    pos2atom = []     # text-char index -> atom index
     chars: list[str] = []
-    char_rpr: list = []
     for r in runs:
-        rpr = r.find(qn("w:rPr"))
-        for t in r.findall(qn("w:t")):
-            for ch in (t.text or ""):
-                chars.append(ch)
-                char_rpr.append(rpr)
+        rpr = r.find(W_RPR)
+        for child in r:
+            if child.tag == W_RPR:
+                continue
+            if child.tag == W_T:
+                for ch in (child.text or ""):
+                    pos2atom.append(len(atoms))
+                    chars.append(ch)
+                    atoms.append(("t", ch, rpr))
+            else:
+                atoms.append(("e", child, rpr))
     full = "".join(chars)
 
     matches = list(TOKEN_RE.finditer(full))
     if not matches:
         return
 
-    if not _paragraph_is_rebuildable(runs):
-        # Don't risk dropping tabs/breaks/images; record and skip.
-        for m in matches:
+    # A token is replaceable only if its characters are a contiguous run of text
+    # atoms (i.e. no tab/break splits the placeholder itself).
+    plan = {}  # text_start -> (text_end, name, raw)
+    for m in matches:
+        j, k = m.start(), m.end()
+        a0, a1 = pos2atom[j], pos2atom[k - 1]
+        if a1 - a0 == k - 1 - j and all(atoms[a][0] == "t" for a in range(a0, a1 + 1)):
+            plan[j] = (k, m.group(1), m.group(0))
+        else:
             report.setdefault("skipped", []).append(m.group(1))
+    if not plan:
         return
 
     new_nodes = []
+    buf: list[str] = []
+    buf_rpr = None
 
-    def emit_literal(a: int, b: int):
-        """Emit text [a, b) as one or more runs, splitting on formatting changes."""
-        i = a
-        while i < b:
-            j = i
-            cur = char_rpr[i]
-            while j < b and char_rpr[j] is cur:
-                j += 1
-            new_nodes.append(_run(full[i:j], cur))
-            i = j
+    def flush():
+        nonlocal buf, buf_rpr
+        if buf:
+            new_nodes.append(_run("".join(buf), buf_rpr))
+            buf = []
 
-    pos = 0
-    for m in matches:
-        emit_literal(pos, m.start())
-        name = m.group(1)
-        raw = m.group(0)
-        if name in terms:
-            value = str(terms[name])
-            rpr = char_rpr[m.start()]
-            counter[0] += 1
-            new_nodes.append(_del(raw, rpr, counter[0], author, date))
-            counter[0] += 1
-            new_nodes.append(_ins(value, rpr, counter[0], author, date))
-            report.setdefault("applied", []).append({"token": name, "value": value})
+    tpos = 0
+    skip_until = -1
+    for kind, payload, rpr in atoms:
+        if kind == "t":
+            if tpos < skip_until:
+                tpos += 1
+                continue
+            if tpos in plan:
+                flush()
+                end, name, raw = plan[tpos]
+                if name in terms:
+                    value = str(terms[name])
+                    counter[0] += 1
+                    new_nodes.append(_del(raw, rpr, counter[0], author, date))
+                    counter[0] += 1
+                    new_nodes.append(_ins(value, rpr, counter[0], author, date))
+                    report.setdefault("applied", []).append({"token": name, "value": value})
+                else:
+                    new_nodes.append(_run(raw, rpr))
+                    report.setdefault("unmatched", []).append(name)
+                skip_until = end
+                tpos += 1
+                continue
+            if buf and rpr is not buf_rpr:
+                flush()
+            if not buf:
+                buf_rpr = rpr
+            buf.append(payload)
+            tpos += 1
         else:
-            # Unknown token: leave the placeholder text in place, flag it.
-            emit_literal(m.start(), m.end())
-            report.setdefault("unmatched", []).append(name)
-        pos = m.end()
-    emit_literal(pos, len(full))
+            flush()
+            new_nodes.append(_run_with_child(payload, rpr))
+    flush()
 
     # Splice: insert the new nodes where the first run was, then drop old runs.
     insert_at = list(p).index(runs[0])
@@ -180,24 +216,36 @@ def _process_paragraph(p, terms: Dict[str, str], counter, author, date, report) 
 # document traversal
 # --------------------------------------------------------------------------- #
 def _iter_paragraphs(document):
-    """Yield every paragraph in body, tables (incl. nested), headers and footers."""
-    def walk_tables(tables):
-        for tbl in tables:
-            for row in tbl.rows:
-                for cell in row.cells:
-                    yield from cell.paragraphs
-                    yield from walk_tables(cell.tables)
+    """Yield every <w:p> in the document, wherever it lives.
 
-    yield from document.paragraphs
-    yield from walk_tables(document.tables)
+    Unlike python-docx's structured navigation (which only reaches body
+    paragraphs and tables that are *direct* children of the body), this walks
+    the raw XML tree, so it also reaches paragraphs nested inside content
+    controls (``w:sdt``), tables wrapped in content controls, text boxes, and
+    arbitrarily nested tables — common in real lease "Data Sheet" forms.
+    Headers and footers (separate XML parts) are covered too.
+    """
+    from docx.text.paragraph import Paragraph
+
+    P = qn("w:p")
+    seen = set()
+
+    def emit(root):
+        for p_elem in root.iter(P):
+            key = id(p_elem)
+            if key in seen:
+                continue
+            seen.add(key)
+            yield Paragraph(p_elem, None)
+
+    yield from emit(document.element.body)
     for section in document.sections:
         for hf in (section.header, section.footer,
                    section.first_page_header, section.first_page_footer,
                    section.even_page_header, section.even_page_footer):
             if hf is None:
                 continue
-            yield from hf.paragraphs
-            yield from walk_tables(hf.tables)
+            yield from emit(hf._element)
 
 
 # --------------------------------------------------------------------------- #
@@ -261,60 +309,85 @@ def generate_redline_direct(template_path: str, changes, output_path: str,
     reps = sorted([((c or "").strip(), (n or "")) for c, n in changes
                    if (c or "").strip() and (n or "") != "" and (c or "").strip() != (n or "")],
                   key=lambda x: -len(x[0]))
-    skip = {qn("w:tab"), qn("w:br"), qn("w:drawing"), qn("w:cr"), qn("w:pict")}
+    W_T, W_RPR = qn("w:t"), qn("w:rPr")
     for p in _iter_paragraphs(document):
         el = p._p
         runs = el.findall(qn("w:r"))
         if not runs:
             continue
-        chars, crpr = [], []
+        atoms = []        # ('t', char, rpr) | ('e', element, rpr)
+        pos2atom = []
+        chars = []
         for r in runs:
-            rpr = r.find(qn("w:rPr"))
-            for t in r.findall(qn("w:t")):
-                for ch in (t.text or ""):
-                    chars.append(ch); crpr.append(rpr)
+            rpr = r.find(W_RPR)
+            for child in r:
+                if child.tag == W_RPR:
+                    continue
+                if child.tag == W_T:
+                    for ch in (child.text or ""):
+                        pos2atom.append(len(atoms))
+                        chars.append(ch)
+                        atoms.append(("t", ch, rpr))
+                else:
+                    atoms.append(("e", child, rpr))
         full = "".join(chars)
+        if not full:
+            continue
         used = [False] * len(full)
-        marks = []
+        marks = {}  # text_start -> (text_end, cur, new)
         for cur, new in reps:
             start = 0
             while True:
                 j = full.find(cur, start)
                 if j < 0:
                     break
-                if not any(used[j:j + len(cur)]):
-                    marks.append((j, j + len(cur), cur, new))
-                    for x in range(j, j + len(cur)):
-                        used[x] = True
-                start = j + len(cur)
+                k = j + len(cur)
+                if not any(used[j:k]):
+                    a0, a1 = pos2atom[j], pos2atom[k - 1]
+                    if a1 - a0 == k - 1 - j and all(atoms[a][0] == "t" for a in range(a0, a1 + 1)):
+                        marks[j] = (k, cur, new)
+                        for x in range(j, k):
+                            used[x] = True
+                start = k
         if not marks:
             continue
-        if any(child.tag in skip for r in runs for child in r):
-            continue
-        marks.sort()
         nodes = []
+        buf, buf_rpr = [], None
 
-        def emit(a, b):
-            i = a
-            while i < b:
-                k = i
-                cur_rpr = crpr[i]
-                while k < b and crpr[k] is cur_rpr:
-                    k += 1
-                nodes.append(_run(full[i:k], cur_rpr))
-                i = k
+        def flush():
+            nonlocal buf, buf_rpr
+            if buf:
+                nodes.append(_run("".join(buf), buf_rpr))
+                buf = []
 
-        pos = 0
-        for s, e, cur, newv in marks:
-            emit(pos, s)
-            rpr = crpr[s] if s < len(crpr) else None
-            counter[0] += 1
-            nodes.append(_del(cur, rpr, counter[0], author, date))
-            counter[0] += 1
-            nodes.append(_ins(newv, rpr, counter[0], author, date))
-            applied.append({"from": cur, "to": newv})
-            pos = e
-        emit(pos, len(full))
+        tpos = 0
+        skip_until = -1
+        for kind, payload, rpr in atoms:
+            if kind == "t":
+                if tpos < skip_until:
+                    tpos += 1
+                    continue
+                if tpos in marks:
+                    flush()
+                    end, cur, newv = marks[tpos]
+                    counter[0] += 1
+                    nodes.append(_del(cur, rpr, counter[0], author, date))
+                    counter[0] += 1
+                    nodes.append(_ins(newv, rpr, counter[0], author, date))
+                    applied.append({"from": cur, "to": newv})
+                    skip_until = end
+                    tpos += 1
+                    continue
+                if buf and rpr is not buf_rpr:
+                    flush()
+                if not buf:
+                    buf_rpr = rpr
+                buf.append(payload)
+                tpos += 1
+            else:
+                flush()
+                nodes.append(_run_with_child(payload, rpr))
+        flush()
         at = list(el).index(runs[0])
         for n in nodes:
             el.insert(at, n); at += 1
