@@ -735,99 +735,185 @@ def _build_sample_loi_pdf() -> bytes:
 # public 3-step funnel ( /start )
 # --------------------------------------------------------------------------- #
 START_PAGE = """
-<div class="startwrap"><div class="inner">
-  <a class="logo" href="/" style="margin-bottom:22px;display:inline-flex"><span class="mark">D</span> Draftease</a>
-  <div class="steps-bar" id="stSteps"></div>
-  <div id="stBody"></div>
-</div></div>
+<style>
+.flow-top{position:sticky;top:0;z-index:30;display:flex;align-items:center;justify-content:space-between;padding:14px 26px;background:rgba(255,255,255,.85);backdrop-filter:saturate(140%) blur(8px);border-bottom:1px solid var(--line)}
+.flow-top .logo{display:inline-flex;align-items:center;gap:9px;font-weight:800;font-size:18px;letter-spacing:-.02em}
+.flow-top .logo .mark{width:30px;height:30px;border-radius:9px;background:linear-gradient(135deg,var(--brand),var(--brand-2));color:#fff;display:flex;align-items:center;justify-content:center;font-weight:800}
+.flow-top .rt{display:flex;align-items:center;gap:14px;font-size:14px;font-weight:600}
+.flow-top .rt a{color:var(--ink-2)}.flow-top .rt a:hover{color:var(--ink)}
+.flow-bg{min-height:100vh;background:radial-gradient(1200px 480px at 50% -8%,var(--brand-soft),transparent 60%),var(--bg-soft)}
+.flow-inner{max-width:760px;margin:0 auto;padding:40px 20px 90px}
+.flow-hero{text-align:center;margin-bottom:34px}
+.flow-hero h1{font-size:46px;line-height:1.04;letter-spacing:-.035em;margin:0 0 12px;font-weight:850}
+.flow-hero h1 .grad{background:linear-gradient(120deg,var(--brand),var(--brand-2) 60%,var(--teal));-webkit-background-clip:text;background-clip:text;color:transparent}
+.flow-hero p{font-size:17px;color:var(--muted);margin:0;font-weight:500}
+.stepcard{position:relative;background:#fff;border:1.5px solid var(--line);border-radius:22px;padding:22px 24px 24px;margin-bottom:18px;box-shadow:var(--shadow);transition:.18s}
+.stepcard.active{border-color:var(--brand-2);box-shadow:0 0 0 4px var(--brand-soft),var(--shadow)}
+.stepcard.done{border-color:#bfe7d4}
+.stepcard.locked{opacity:.55}
+.stepcard .shead{display:flex;align-items:center;gap:14px;margin-bottom:16px}
+.stepnum{flex:none;width:42px;height:42px;border-radius:13px;display:flex;align-items:center;justify-content:center;font-weight:850;font-size:19px;background:linear-gradient(135deg,var(--brand),var(--brand-2));color:#fff;box-shadow:0 6px 16px rgba(67,56,202,.32)}
+.stepcard.done .stepnum{background:linear-gradient(135deg,var(--green),#15b886);box-shadow:0 6px 16px rgba(15,157,110,.3)}
+.stepcard.locked .stepnum{background:#cdd2e4;box-shadow:none}
+.shead .stitle{font-size:19px;font-weight:800;letter-spacing:-.02em}
+.shead .ssub{font-size:13px;color:var(--muted);font-weight:500;margin-top:1px}
+.shead .schip{margin-left:auto;font-size:12.5px;font-weight:700;color:var(--green);background:var(--green-soft);padding:5px 11px;border-radius:999px}
+.ddwrap{position:relative}
+.ddbtn{width:100%;display:flex;align-items:center;gap:12px;text-align:left;border:2px solid var(--line);border-radius:14px;padding:15px 16px;font-size:15.5px;font-weight:650;color:var(--ink);background:var(--bg-softer);transition:.15s}
+.ddbtn:hover{border-color:#c4c9de;background:#fff}
+.ddbtn.set{border-color:var(--brand-2);background:#fff}
+.ddbtn .dlab{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ddbtn .dph{color:var(--muted);font-weight:600}
+.ddbtn .dchev{flex:none;color:var(--muted);font-size:13px}
+.ddmenu{position:absolute;left:0;right:0;top:calc(100% + 8px);z-index:40;background:#fff;border:1.5px solid var(--line);border-radius:14px;box-shadow:var(--shadow-lg);padding:6px;max-height:330px;overflow:auto}
+.ddopt{display:flex;align-items:center;gap:10px;padding:12px 13px;border-radius:10px;font-size:14.5px;font-weight:600;cursor:pointer}
+.ddopt:hover{background:var(--bg-soft)}
+.ddopt .meta{margin-left:auto;font-size:12.5px;color:var(--muted);font-weight:600}
+.ddopt.add{color:var(--brand-ink);font-weight:750}.ddopt.add:hover{background:var(--brand-soft)}
+.ddopt .ic{width:26px;height:26px;flex:none;border-radius:8px;background:var(--bg-soft);display:flex;align-items:center;justify-content:center;font-size:14px}
+.ddopt.add .ic{background:var(--brand-soft)}
+.ddsep{height:1px;background:var(--line-2);margin:5px 4px}
+.ddback{position:fixed;inset:0;z-index:35}
+.termwrap{margin-top:18px;border-top:1px dashed var(--line);padding-top:16px}
+.termhd{font-size:13px;font-weight:800;letter-spacing:.02em;text-transform:uppercase;color:var(--muted);margin-bottom:10px}
+.trow{display:grid;gap:10px;align-items:center;padding:6px 0}
+.trow .tl{font-size:13.5px;color:var(--ink-2);font-weight:650}
+.trow input{width:100%;font-size:14px;border:1.5px solid var(--line);border-radius:10px;padding:10px 12px;font-weight:550}
+.trow input:focus{outline:none;border-color:var(--brand-2);box-shadow:0 0 0 3px var(--brand-soft)}
+.bigcreate{width:100%;justify-content:center;font-size:16px;font-weight:750;padding:16px;border-radius:14px;background:linear-gradient(135deg,var(--brand),var(--brand-2));color:#fff;display:inline-flex;align-items:center;gap:9px;transition:.15s;box-shadow:0 10px 26px rgba(67,56,202,.3)}
+.bigcreate:hover{filter:brightness(1.05)}
+.bigcreate:disabled{background:#c8cce0;box-shadow:none;cursor:default;opacity:1}
+.flownote{background:var(--amber-soft);border:1px solid #fbe2b8;color:#8a5a00;border-radius:12px;padding:12px 14px;font-size:13.5px;font-weight:600;margin-bottom:14px}
+.planrow{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin:4px 0 16px}
+.planopt2{border:2px solid var(--line);border-radius:14px;padding:14px;cursor:pointer;font-weight:750;transition:.15s}
+.planopt2:hover{border-color:#c4c9de}
+.planopt2.sel{border-color:var(--brand-2);background:var(--brand-soft)}
+.planopt2 .pp{font-size:20px;font-weight:850;margin-top:3px;letter-spacing:-.02em}.planopt2 .pp span{font-size:12.5px;color:var(--muted);font-weight:600}
+.fld{width:100%;font-size:15px;border:1.5px solid var(--line);border-radius:12px;padding:12px 13px;margin-bottom:10px;font-weight:550}.fld:focus{outline:none;border-color:var(--brand-2);box-shadow:0 0 0 3px var(--brand-soft)}
+@media(max-width:560px){.flow-hero h1{font-size:34px}.trow{grid-template-columns:1fr!important}}
+</style>
+<div class="flow-bg">
+  <div class="flow-top">
+    <a class="logo" href="/"><span class="mark">D</span> Draftease</a>
+    <div class="rt">__NAVRIGHT__</div>
+  </div>
+  <div class="flow-inner">
+    <div class="flow-hero">
+      <h1>Create a <span class="grad">redline</span></h1>
+      <p>Pick a template, drop in the LOI, get a tracked-changes draft.</p>
+    </div>
+    <div id="steps"></div>
+  </div>
+</div>
+<input type="file" id="tplFileIn" accept=".docx" style="display:none" onchange="onTplFile()">
+<input type="file" id="loiFileIn" accept=".pdf,.docx" style="display:none" onchange="onLoiFile()">
 <div id="toast" class="toast"></div>
 <script>
-const CSRF0="__CSRF__"; let CSRF="__CSRF__"; const LOGGED_IN=__LOGGED_IN__; const AI_ON=__AI__;
+let CSRF="__CSRF__"; const LOGGED_IN=__LOGGED_IN__; const AI_ON=__AI__;
 let STATE={templates:[],lois:[]};
-let step=1, baseMode='', baseTid=null, leaseFile=null, terms=[], loiMode='', loiId=null, loiFile=null, plan='single';
-const LB=["Base lease","LOI & terms","Create redline"];
+let baseMode='', baseTid=null, leaseFile=null, terms=[], loiMode='', loiId=null, loiFile=null, plan='payg', openMenu='';
 function esc(s){return (s==null?'':String(s)).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}
 function prettify(t){return String(t).replace(/_/g,' ').replace(/\\b\\w/g,c=>c.toUpperCase());}
 function toast(m){const t=document.getElementById('toast');t.textContent=m;t.classList.add('show');clearTimeout(window._tt);window._tt=setTimeout(()=>t.classList.remove('show'),2800);}
 function download(blob,nm){const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download=nm;document.body.appendChild(a);a.click();a.remove();URL.revokeObjectURL(url);}
-function renderSteps(){document.getElementById('stSteps').innerHTML=LB.map((s,i)=>{const n=i+1;const cls=n<step?'done':(n===step?'active':'');const line=i<2?`<div class="sline ${n<step?'fill':''}"></div>`:'';return `<div class="sbubble ${cls}"><div class="num">${n<step?'✓':n}</div><div class="stxt">${s}</div></div>${line}`;}).join('');}
-function render(){renderSteps();document.getElementById('stBody').innerHTML=({1:s1,2:s2,3:s3}[step]||s1)();}
 async function loadStart(){try{const[t,l]=await Promise.all([fetch('/api/templates').then(r=>r.ok?r.json():[]),fetch('/api/lois').then(r=>r.ok?r.json():[])]);STATE.templates=Array.isArray(t)?t:[];STATE.lois=Array.isArray(l)?l:[];}catch(e){}render();}
-function s1(){
-  const opts=['<option value="">Choose a template…</option>']
-    .concat(STATE.templates.map(t=>`<option value="t:${t.id}" ${baseMode==='template'&&baseTid===t.id?'selected':''}>${esc(t.name)} (${t.tokens.length} fields)</option>`))
-    .concat([`<option value="upload" ${baseMode==='upload'?'selected':''}>➕ Upload a new lease / template…</option>`]).join('');
-  let extra='';
-  if(baseMode==='upload'){extra=`<input type="file" id="leaseInput" accept=".docx" style="display:none" onchange="onLease()"><div class="drop" style="margin-top:12px" onclick="document.getElementById('leaseInput').click()"><div class="dic">${leaseFile?'📄':'⬆️'}</div><h4>${leaseFile?esc(leaseFile.name):'Drop / choose your lease (.docx)'}</h4><p>${leaseFile?('Found '+terms.length+' standard terms'):'we auto-detect standard terms — no tokens needed'}</p></div><div id="s1err" class="modal-err" style="display:none"></div>`;}
-  const ready=(baseMode==='template'&&baseTid)||(baseMode==='upload'&&leaseFile&&terms.length);
-  return `<div class="wbox"><h2>Step 1 &mdash; Pick the base lease / template</h2><p class="wsub">Choose one of your saved templates, or upload a new lease as the base document.</p>
-    <select class="gin" onchange="onBase(this.value)">${opts}</select>${extra}
-    <div class="wfoot"><a class="btn btn-ghost" href="/">Cancel</a><button class="btn btn-primary" ${ready?'':'disabled'} onclick="step=2;render()">Continue →</button></div></div>`;}
-function onBase(v){if(v==='upload'){baseMode='upload';baseTid=null;terms=[];}
-  else if(v&&v.indexOf('t:')===0){baseMode='template';baseTid=parseInt(v.slice(2));leaseFile=null;const t=STATE.templates.find(x=>x.id===baseTid);terms=((t&&t.tokens)||[]).map(tok=>({token:tok,label:prettify(tok),value:''}));}
-  else{baseMode='';baseTid=null;terms=[];leaseFile=null;}render();}
-async function onLease(){const f=document.getElementById('leaseInput').files[0];if(!f)return;leaseFile=f;terms=[];render();const err=document.getElementById('s1err');
+function setMenu(id){openMenu=(openMenu===id?'':id);render();}
+function closeMenu(){openMenu='';render();}
+
+/* ---------- step 1: base template ---------- */
+function baseLabel(){if(baseMode==='template'){const t=STATE.templates.find(x=>x.id===baseTid);return t?esc(t.name):'Choose a template';}if(baseMode==='upload'){return leaseFile?esc(leaseFile.name):'New template';}return '';}
+function baseDone(){return (baseMode==='template'&&baseTid)||(baseMode==='upload'&&leaseFile&&terms.length);}
+function tplMenu(){
+  let items='<div class="ddopt add" onclick="addTemplate()"><span class="ic">＋</span> Add new template</div>';
+  if(STATE.templates.length) items+='<div class="ddsep"></div>';
+  items+=STATE.templates.map(t=>`<div class="ddopt" onclick="chooseTpl(${t.id})"><span class="ic">📄</span><span>${esc(t.name)}</span><span class="meta">${t.tokens.length} fields</span></div>`).join('');
+  return `<div class="ddback" onclick="closeMenu()"></div><div class="ddmenu">${items}</div>`;}
+function addTemplate(){openMenu='';document.getElementById('tplFileIn').value='';document.getElementById('tplFileIn').click();}
+function chooseTpl(id){baseMode='template';baseTid=id;leaseFile=null;openMenu='';const t=STATE.templates.find(x=>x.id===id);terms=((t&&t.tokens)||[]).map(tok=>({token:tok,label:prettify(tok),value:''}));render();}
+async function onTplFile(){const f=document.getElementById('tplFileIn').files[0];if(!f)return;baseMode='upload';baseTid=null;leaseFile=f;terms=[];render();
   const fd=new FormData();fd.append('file',f);
-  try{const r=await fetch('/api/scan',{method:'POST',body:fd});if(!r.ok){if(err){err.textContent=await r.text();err.style.display='block';}return;}const j=await r.json();
-    terms=(j.standard||[]).map(s=>({key:s.key,label:s.label,current:((j.suggestions||{})[s.key]||''),nw:''}));
-  }catch(e){if(err){err.textContent=''+e;err.style.display='block';}}render();}
-function s2(){
-  const opts=['<option value="">No LOI / enter terms manually</option>']
-    .concat(STATE.lois.map(l=>`<option value="l:${l.id}" ${loiMode==='loi'&&loiId===l.id?'selected':''}>${esc(l.name)}</option>`))
-    .concat([`<option value="upload" ${loiMode==='upload'?'selected':''}>➕ Upload a new LOI…</option>`]).join('');
-  let loiExtra='';
-  if(loiMode==='upload'){loiExtra=`<input type="file" id="loiInput" accept=".pdf,.docx" style="display:none" onchange="onLoi()"><div class="drop" style="padding:18px;margin-top:10px" onclick="document.getElementById('loiInput').click()"><div class="dic" style="width:40px;height:40px;font-size:18px">📄</div><h4>${loiFile?esc(loiFile.name):'Choose the signed LOI (PDF or .docx)'}</h4></div>`;}
-  let tbl;
-  if(baseMode==='template'){
-    tbl=`<div class="terms-table" style="margin-top:16px"><div class="tr" style="grid-template-columns:1fr 1.4fr"><div class="lbl">Term</div><div class="lbl">New value (from LOI)</div></div>${terms.map((t,i)=>`<div class="tr" style="grid-template-columns:1fr 1.4fr"><div class="lbl">${esc(t.label)}</div><input value="${esc(t.value)}" placeholder="blank = unchanged" oninput="terms[${i}].value=this.value"></div>`).join('')}</div>`;
-  }else{
-    tbl=`<div class="terms-table" style="margin-top:16px"><div class="tr" style="grid-template-columns:1fr 1fr 1fr"><div class="lbl">Term</div><div class="lbl">Current (in lease)</div><div class="lbl">New (from LOI)</div></div>${terms.map((t,i)=>`<div class="tr" style="grid-template-columns:1fr 1fr 1fr"><div class="lbl">${esc(t.label)}</div><input value="${esc(t.current)}" oninput="terms[${i}].current=this.value"><input value="${esc(t.nw)}" placeholder="blank = no change" oninput="terms[${i}].nw=this.value"></div>`).join('')}</div>`;
-  }
-  const loiHint=AI_ON?'Choose or upload the signed LOI and we\\'ll read it and pre-fill the new terms below — please verify each one.':'Choose or upload the signed LOI, then type the new terms it specifies into the table below.';
-  return `<div class="wbox"><h2>Step 2 &mdash; Pick the LOI &amp; new terms</h2><p class="wsub">${loiHint}</p>
-    <select class="gin" onchange="onLoiSel(this.value)">${opts}</select>${loiExtra}${tbl}
-    <div class="wfoot"><button class="btn btn-ghost" onclick="step=1;render()">← Back</button><button class="btn btn-primary" onclick="step=3;render()">Continue →</button></div></div>`;}
-function onLoiSel(v){if(v==='upload'){loiMode='upload';loiId=null;}else if(v&&v.indexOf('l:')===0){loiMode='loi';loiId=parseInt(v.slice(2));loiFile=null;render();if(AI_ON)extractLoi();return;}else{loiMode='';loiId=null;loiFile=null;}render();}
-function onLoi(){loiFile=document.getElementById('loiInput').files[0]||null;render();if(AI_ON&&loiFile)extractLoi();}
-function applyExtracted(d){if(!d)return;let hit=0;terms.forEach(t=>{const k=t.token||t.key;const v=(d[k]||'').trim();if(!v)return;hit++;if(baseMode==='template'){t.value=v;}else{t.nw=v;}});return hit;}
+  try{const r=await fetch('/api/scan',{method:'POST',body:fd});if(!r.ok){toast('Could not read that .docx: '+(await r.text()));return;}const j=await r.json();
+    terms=(j.standard||[]).map(s=>({key:s.key,label:s.label,current:((j.suggestions||{})[s.key]||''),nw:''}));toast('Template added — '+terms.length+' standard terms detected.');
+  }catch(e){toast('Could not read that file.');}render();}
+
+/* ---------- step 2: LOI / term sheet ---------- */
+function loiLabel(){if(loiMode==='loi'){const l=STATE.lois.find(x=>x.id===loiId);return l?esc(l.name):'Saved LOI';}if(loiMode==='upload')return loiFile?esc(loiFile.name):'New LOI';if(loiMode==='manual')return 'Enter terms manually';return '';}
+function loiMenu(){
+  let items='<div class="ddopt add" onclick="addLoi()"><span class="ic">＋</span> Add new LOI / term sheet</div>';
+  items+='<div class="ddopt" onclick="chooseManual()"><span class="ic">✎</span> No LOI — enter terms manually</div>';
+  if(STATE.lois.length) items+='<div class="ddsep"></div>'+STATE.lois.map(l=>`<div class="ddopt" onclick="chooseLoi(${l.id})"><span class="ic">📑</span><span>${esc(l.name)}</span></div>`).join('');
+  return `<div class="ddback" onclick="closeMenu()"></div><div class="ddmenu">${items}</div>`;}
+function addLoi(){openMenu='';document.getElementById('loiFileIn').value='';document.getElementById('loiFileIn').click();}
+function chooseManual(){loiMode='manual';loiId=null;loiFile=null;openMenu='';render();}
+function chooseLoi(id){loiMode='loi';loiId=id;loiFile=null;openMenu='';render();if(AI_ON)extractLoi();}
+function onLoiFile(){const f=document.getElementById('loiFileIn').files[0];if(!f)return;loiMode='upload';loiFile=f;render();if(AI_ON)extractLoi();else toast('LOI attached — enter the new terms below.');}
+function applyExtracted(d){if(!d)return 0;let hit=0;terms.forEach(t=>{const k=t.token||t.key;const v=(d[k]||'').trim();if(!v)return;hit++;if(baseMode==='template'){t.value=v;}else{t.nw=v;}});return hit;}
 async function extractLoi(){const fd=new FormData();if(loiMode==='upload'&&loiFile){fd.append('file',loiFile);}else if(loiMode==='loi'&&loiId){fd.append('loi_id',loiId);}else{return;}fd.append('csrf',CSRF);
   toast('Reading the LOI…');
   try{const r=await fetch('/api/extract-loi',{method:'POST',body:fd});if(!r.ok){toast(r.status===503?'AI reading not enabled — enter terms manually.':'Could not read LOI — enter terms manually.');return;}
-    const j=await r.json();const hit=applyExtracted(j.terms||{});render();toast(hit?('Pre-filled '+hit+' term'+(hit===1?'':'s')+' from the LOI — please verify.'):'No matching terms found — enter them manually.');
+    const j=await r.json();const hit=applyExtracted(j.terms||{});render();toast(hit?('Pre-filled '+hit+' term'+(hit===1?'':'s')+' — please verify.'):'No matching terms found — enter them manually.');
   }catch(e){toast('Could not read LOI — enter terms manually.');}}
+function termsPanel(){
+  if(!baseMode||!terms.length) return '';
+  let rows;
+  if(baseMode==='template'){
+    rows=terms.map((t,i)=>`<div class="trow" style="grid-template-columns:1fr 1.5fr"><div class="tl">${esc(t.label)}</div><input value="${esc(t.value)}" placeholder="blank = unchanged" oninput="terms[${i}].value=this.value"></div>`).join('');
+  }else{
+    rows=`<div class="trow" style="grid-template-columns:1fr 1fr 1fr"><div class="tl" style="font-size:12px;text-transform:uppercase;color:var(--muted)">Term</div><div class="tl" style="font-size:12px;text-transform:uppercase;color:var(--muted)">Current</div><div class="tl" style="font-size:12px;text-transform:uppercase;color:var(--muted)">New</div></div>`+terms.map((t,i)=>`<div class="trow" style="grid-template-columns:1fr 1fr 1fr"><div class="tl">${esc(t.label)}</div><input value="${esc(t.current)}" oninput="terms[${i}].current=this.value"><input value="${esc(t.nw)}" placeholder="blank = no change" oninput="terms[${i}].nw=this.value"></div>`).join('');
+  }
+  return `<div class="termwrap"><div class="termhd">Terms to apply${AI_ON?' · auto-filled from the LOI where found':''}</div>${rows}</div>`;}
+
+/* ---------- step 3: create ---------- */
 function changeCount(){if(baseMode==='template'){return terms.filter(t=>t.value&&t.value.trim()).length;}return terms.filter(t=>t.nw&&t.nw.trim()&&t.current&&t.current.trim()&&t.nw.trim()!==t.current.trim()).length;}
-function dlname(){if(baseMode==='template'){const t=STATE.templates.find(x=>x.id===baseTid);return (((t&&t.name)||'lease').replace(/[^a-z0-9]+/gi,'_'))+'_redline.docx';}return leaseFile.name.replace(/\\.docx$/i,'')+'_redline.docx';}
+function dlname(){if(baseMode==='template'){const t=STATE.templates.find(x=>x.id===baseTid);return (((t&&t.name)||'lease').replace(/[^a-z0-9]+/gi,'_'))+'_redline.docx';}return (leaseFile?leaseFile.name.replace(/\\.docx$/i,''):'lease')+'_redline.docx';}
 function doGenerate(){if(baseMode==='template'){const tt={};terms.forEach(x=>{if(x.value&&x.value.trim())tt[x.token]=x.value.trim();});const fd=new FormData();fd.append('template_id',baseTid);fd.append('terms',JSON.stringify(tt));fd.append('csrf',CSRF);return fetch('/api/redline-from-template',{method:'POST',body:fd});}
   const ch=terms.filter(x=>x.nw&&x.nw.trim()&&x.current&&x.current.trim()&&x.nw.trim()!==x.current.trim()).map(x=>[x.current.trim(),x.nw.trim()]);const fd=new FormData();fd.append('lease',leaseFile);fd.append('changes',JSON.stringify(ch));fd.append('csrf',CSRF);return fetch('/api/guest-redline',{method:'POST',body:fd});}
-function noTermsNote(){const need=baseMode==='template'?'enter a New value for at least one term':'fill in both the Current and New value for at least one term';
-  return `<div class="modal-err" style="display:block;background:#fff7ed;border-color:#fed7aa;color:#9a3412">No term changes yet. Go back to Step 2 and ${need}. The redline only changes terms you give a new value for.</div>`;}
-function s3(){const n=changeCount();
-  if(LOGGED_IN){return `<div class="wbox"><h2>Step 3 &mdash; Create redline</h2><p class="wsub">${n} term${n===1?'':'s'} will be applied. We'll produce a Word tracked-changes redline.</p>
-    ${n?'':noTermsNote()}
-    <div class="wfoot"><button class="btn btn-ghost" onclick="step=2;render()">← Back to terms</button>${n?'<button class="btn btn-primary" onclick="gen(event)">Generate redline →</button>':''}</div></div>`;}
+
+/* ---------- render ---------- */
+function card(n,cls,title,sub,chip,body){return `<div class="stepcard ${cls}"><div class="shead"><div class="stepnum">${cls.indexOf('done')>=0?'✓':n}</div><div><div class="stitle">${title}</div><div class="ssub">${sub}</div></div>${chip?`<div class="schip">${chip}</div>`:''}</div>${body}</div>`;}
+function render(){
+  const s=document.getElementById('steps');
+  // Step 1
+  const b1=`<div class="ddwrap"><button class="ddbtn ${baseMode?'set':''}" onclick="setMenu('tpl')"><span class="dlab ${baseMode?'':'dph'}">${baseMode?baseLabel():'Choose a template…'}</span><span class="dchev">▾</span></button>${openMenu==='tpl'?tplMenu():''}</div>`;
+  const c1=card(1, baseDone()?'done':'active', 'Base template', 'The form lease to redline from', baseDone()?'Ready':'', b1);
+  // Step 2
+  const locked2=!baseMode;
+  const b2=`<div class="ddwrap"><button class="ddbtn ${loiMode?'set':''}" ${locked2?'disabled style=\\'opacity:.6\\'':''} onclick="${locked2?'':'setMenu(\\'loi\\')'}"><span class="dlab ${loiMode?'':'dph'}">${loiMode?loiLabel():'Choose LOI / term sheet…'}</span><span class="dchev">▾</span></button>${openMenu==='loi'?loiMenu():''}</div>${termsPanel()}`;
+  const c2=card(2, locked2?'locked':(changeCount()?'done':'active'), 'LOI / term sheet', 'Terms to apply to the lease', changeCount()?changeCount()+' set':'', b2);
+  // Step 3
+  const c3=card(3, 'active', 'Create redline', 'Generate the tracked-changes draft', '', step3Body());
+  s.innerHTML=c1+c2+c3;
+}
+function noTermsNote(){return `<div class="flownote">No terms entered yet — choose your LOI (or "enter terms manually") above and give at least one term a new value.</div>`;}
+function step3Body(){
+  const n=changeCount();
+  if(LOGGED_IN){
+    return `${n?'':noTermsNote()}<button class="bigcreate" ${n?'':'disabled'} onclick="gen(event)">Create redline${n?' — '+n+' change'+(n===1?'':'s'):''} →</button>`;
+  }
   const plans=[['payg','Single use','$50','per redline'],['unlimited','Monthly','$199','unlimited']];
-  return `<div class="wbox"><h2>Step 3 &mdash; Create your account</h2><p class="wsub">Register (or sign in) and choose a plan to generate your redline (${n} change${n===1?'':'s'}). New accounts include free trial credits.</p>
-    ${n?'':noTermsNote()}
-    <div class="planpick" style="grid-template-columns:repeat(2,1fr)">${plans.map(p=>`<div class="planopt ${plan===p[0]?'sel':''}" onclick="plan='${p[0]}';render()">${p[1]}<div class="pa">${p[2]}<span> ${p[3]}</span></div></div>`).join('')}</div>
-    <label class="field-label">Name</label><input id="gName" class="gin" type="text" autocomplete="name">
-    <label class="field-label">Work email</label><input id="gEmail" class="gin" type="email" autocomplete="email">
-    <label class="field-label">Password</label><input id="gPass" class="gin" type="password" autocomplete="new-password"><div class="hint" style="margin-top:6px">At least 8 characters. Already have an account? <a href="/login" style="color:var(--brand);font-weight:600">Sign in</a>.</div>
-    <div id="s3err" class="modal-err" style="display:none"></div>
-    <div class="wfoot"><button class="btn btn-ghost" onclick="step=2;render()">← Back</button><button class="btn btn-primary" ${n?'':'disabled'} onclick="registerAndGen(event)">Create account &amp; generate →</button></div></div>`;}
-async function gen(e){const btn=e.target;if(!changeCount()){toast('Enter at least one new term.');return;}const old=btn.textContent;btn.textContent='Generating…';btn.disabled=true;
-  try{const r=await doGenerate();if(!r.ok){const m=await r.text();toast(r.status===402?'Out of credits — choose a plan.':'Error: '+m);btn.textContent=old;btn.disabled=false;return;}download(await r.blob(),dlname());btn.textContent='✓ Downloaded';toast('Redline generated ✓');}catch(err){toast('Error: '+err);btn.textContent=old;btn.disabled=false;}}
-async function registerAndGen(e){const btn=e.target;const err=document.getElementById('s3err');const show=(m)=>{err.textContent=m;err.style.display='block';btn.textContent='Create account & generate →';btn.disabled=false;};
+  return `${n?'':noTermsNote()}
+    <div class="planrow">${plans.map(p=>`<div class="planopt2 ${plan===p[0]?'sel':''}" onclick="plan='${p[0]}';render()">${p[1]}<div class="pp">${p[2]} <span>${p[3]}</span></div></div>`).join('')}</div>
+    <input id="gName" class="fld" type="text" placeholder="Your name" autocomplete="name">
+    <input id="gEmail" class="fld" type="email" placeholder="Work email" autocomplete="email">
+    <input id="gPass" class="fld" type="password" placeholder="Password (8+ characters)" autocomplete="new-password">
+    <div id="s3err" class="modal-err" style="display:none;margin-bottom:10px"></div>
+    <button class="bigcreate" ${n?'':'disabled'} onclick="registerAndGen(event)">Create account &amp; redline →</button>
+    <div class="hint" style="text-align:center;margin-top:10px">Already have an account? <a href="/login" style="color:var(--brand);font-weight:700">Sign in</a></div>`;
+}
+async function gen(e){const btn=e.target.closest('button');if(!changeCount()){toast('Add at least one new term.');return;}const old=btn.innerHTML;btn.innerHTML='Generating…';btn.disabled=true;
+  try{const r=await doGenerate();if(!r.ok){const m=await r.text();toast(r.status===402?'Out of credits — choose a plan.':'Error: '+m);btn.innerHTML=old;btn.disabled=false;return;}download(await r.blob(),dlname());btn.innerHTML='✓ Downloaded';toast('Redline generated ✓');}catch(err){toast('Error: '+err);btn.innerHTML=old;btn.disabled=false;}}
+async function registerAndGen(e){const btn=e.target.closest('button');const err=document.getElementById('s3err');const show=(m)=>{err.textContent=m;err.style.display='block';btn.innerHTML='Create account &amp; redline →';btn.disabled=false;};
   const name=document.getElementById('gName').value.trim();const email=document.getElementById('gEmail').value.trim();const pass=document.getElementById('gPass').value;
   if(!email||!pass){show('Enter your email and a password.');return;}
-  if(baseMode==='template'){show('Saved templates need an account. Please sign in, or upload a new lease in Step 1.');return;}
-  err.style.display='none';btn.textContent='Creating account…';btn.disabled=true;
+  if(baseMode==='template'){show('Saved templates need an account — please sign in, or add a new template file in Step 1.');return;}
+  err.style.display='none';btn.innerHTML='Creating account…';btn.disabled=true;
   try{const fd=new FormData();fd.append('name',name);fd.append('email',email);fd.append('password',pass);fd.append('csrf',CSRF);
     const r=await fetch('/signup',{method:'POST',body:fd});
     if(!(r.redirected||r.ok)){show('Could not create the account — the email may already be registered. Try signing in.');return;}
     try{const cr=await fetch('/api/csrf');CSRF=(await cr.json()).csrf;}catch(x){}
-    btn.textContent='Generating…';const r2=await doGenerate();
+    btn.innerHTML='Generating…';const r2=await doGenerate();
     if(!r2.ok){show('Account created, but the redline failed: '+await r2.text());return;}
-    download(await r2.blob(),dlname());btn.textContent='✓ Done — go to dashboard';btn.disabled=false;btn.onclick=function(){location.href='/';};toast('Account created — redline downloaded ✓');
+    download(await r2.blob(),dlname());btn.innerHTML='✓ Done';btn.disabled=false;btn.onclick=function(){location.href='/';};toast('Account created — redline downloaded ✓');
   }catch(err2){show(''+err2);}}
 loadStart();
 </script>
@@ -906,15 +992,28 @@ async def api_guest_redline(request: Request, lease: UploadFile = File(...),
         headers={"Content-Disposition": f'attachment; filename="{fn}"'})
 
 
-@app.get("/start", response_class=HTMLResponse)
-def start(request: Request):
+def _render_flow(request: Request) -> HTMLResponse:
     u = current_user(request)
+    tok = csrf_token(request)
+    if u:
+        nav = (f'<a href="/app">Dashboard</a>'
+               f'<form method="post" action="/logout" style="margin:0;display:inline">'
+               f'<input type="hidden" name="csrf" value="{tok}">'
+               f'<button type="submit" style="background:none;border:none;cursor:pointer;'
+               f'color:var(--ink-2);font-weight:600;font-size:14px;padding:0">Sign out</button></form>')
+    else:
+        nav = '<a href="/login">Log in</a>'
     body = (START_PAGE
-            .replace("__CSRF__", csrf_token(request))
+            .replace("__CSRF__", tok)
             .replace("__LOGGED_IN__", "true" if u else "false")
             .replace("__AI__", "true" if ai_extract.ENABLED else "false")
-            .replace("__NAME__", (u.name or u.email) if u else ""))
+            .replace("__NAVRIGHT__", nav))
     return HTMLResponse(page(body, "Create a redline · Draftease"))
+
+
+@app.get("/start", response_class=HTMLResponse)
+def start(request: Request):
+    return _render_flow(request)
 
 
 @app.get("/legal", response_class=HTMLResponse)
@@ -936,8 +1035,17 @@ def legal():
 @app.get("/", response_class=HTMLResponse)
 def home(request: Request):
     user = current_user(request)
-    return HTMLResponse(app_shell(request, user) if user
-                        else page(MARKETING, "Draftease — Lease redlines from your LOIs"))
+    if user:
+        return _render_flow(request)
+    return HTMLResponse(page(MARKETING, "Draftease — Lease redlines from your LOIs"))
+
+
+@app.get("/app", response_class=HTMLResponse)
+def dashboard(request: Request):
+    user = current_user(request)
+    if not user:
+        return RedirectResponse("/login", status_code=303)
+    return HTMLResponse(app_shell(request, user))
 
 
 @app.get("/login", response_class=HTMLResponse)
