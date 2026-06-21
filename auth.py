@@ -208,6 +208,21 @@ def get_template_blob(user_id: int, tid: int):
         return t.name, t.data, _json.loads(t.tokens or "[]")
 
 
+def update_template(user_id: int, tid: int, data: bytes, tokens: list,
+                    name: str | None = None) -> dict | None:
+    """Replace a template's stored file + token list in place (e.g. after tagging)."""
+    with Session(_engine) as s:
+        t = s.get(Template, tid)
+        if not t or t.user_id != user_id:
+            return None
+        t.data = data
+        t.tokens = _json.dumps(tokens)
+        if name:
+            t.name = name.strip() or t.name
+        s.commit(); s.refresh(t)
+        return _tpl_dict(t)
+
+
 def delete_template(user_id: int, tid: int) -> None:
     with Session(_engine) as s:
         s.execute(delete(Template).where(Template.id == tid, Template.user_id == user_id))

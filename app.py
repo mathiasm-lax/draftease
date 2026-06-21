@@ -1132,6 +1132,38 @@ async def api_template_tag(request: Request, name: str = Form(...), kind: str = 
     return JSONResponse(t)
 
 
+@app.post("/api/templates/{tid}/retag")
+async def api_template_retag(request: Request, tid: int, mapping: str = Form(...),
+                            csrf: str = Form(...)):
+    """Tag an already-saved (untagged) template in place from a confirmed mapping."""
+    u = _require(request)
+    if not check_csrf(request, csrf):
+        raise HTTPException(400, "Session expired — reload the page.")
+    blob = auth.get_template_blob(u.id, tid)
+    if not blob:
+        raise HTTPException(404, "Template not found.")
+    name, data, _toks = blob
+    try:
+        mp = json.loads(mapping)
+    except json.JSONDecodeError:
+        raise HTTPException(400, "Bad tag mapping.")
+    with tempfile.TemporaryDirectory() as d:
+        ip, op = os.path.join(d, "in.docx"), os.path.join(d, "out.docx")
+        with open(ip, "wb") as fh:
+            fh.write(data)
+        try:
+            n = tagger.apply_tags(ip, mp, op)
+            toks = extract_tokens(op)
+            newdata = open(op, "rb").read()
+        except Exception as exc:  # noqa: BLE001
+            raise HTTPException(422, f"Could not tag that lease: {exc}")
+    updated = auth.update_template(u.id, tid, newdata, toks)
+    if not updated:
+        raise HTTPException(404, "Template not found.")
+    updated["tagged"] = n
+    return JSONResponse(updated)
+
+
 @app.get("/api/lois")
 def api_lois(request: Request):
     return JSONResponse(auth.list_lois(_require(request).id))
